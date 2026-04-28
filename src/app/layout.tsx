@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "소캠1팀 캠페인 트래커",
+  title: "소셜캠페인 유입 확인기",
   description: "UTM 빌더 + 단축 URL + GA 분석을 한 곳에서",
 };
 

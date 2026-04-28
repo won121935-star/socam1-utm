@@ -207,7 +207,7 @@ export default function Home() {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Link2 className="text-blue-600" size={28} />
-          <h1 className="text-xl font-semibold">소캠1팀 캠페인 트래커</h1>
+          <h1 className="text-xl font-semibold">소셜캠페인 유입 확인기</h1>
           <span className="hidden text-xs text-zinc-500 md:inline">
             · UTM + 단축 URL + GA
           </span>
@@ -260,31 +260,39 @@ export default function Home() {
             </Field>
           </div>
 
-          {/* 캠페인 기간 (그룹 입력 시에만 의미 있음) */}
-          {campaignName.trim() && (
-            <div className="grid grid-cols-2 gap-3 rounded-xl bg-zinc-50 p-3 ring-1 ring-zinc-200">
-              <Field label="📅 캠페인 시작일 (선택)">
-                <input
-                  type="date"
-                  value={campaignStartDate}
-                  onChange={(e) => setCampaignStartDate(e.target.value)}
-                  className="w-full rounded-xl bg-white px-3 py-2 text-sm outline-none ring-1 ring-zinc-200"
-                />
-              </Field>
-              <Field label="📅 캠페인 종료일 (선택)">
-                <input
-                  type="date"
-                  value={campaignEndDate}
-                  onChange={(e) => setCampaignEndDate(e.target.value)}
-                  min={campaignStartDate || undefined}
-                  className="w-full rounded-xl bg-white px-3 py-2 text-sm outline-none ring-1 ring-zinc-200"
-                />
-              </Field>
-              <p className="col-span-2 text-[10px] text-zinc-500">
-                기존 캠페인이면 입력한 날짜로 갱신, 새 캠페인이면 그대로 저장
-              </p>
-            </div>
-          )}
+          {/* 캠페인 기간 — 항상 노출, 컴팩트 */}
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-zinc-500">📅 캠페인 기간 (선택):</span>
+            <input
+              type="date"
+              value={campaignStartDate}
+              onChange={(e) => setCampaignStartDate(e.target.value)}
+              className="rounded-lg bg-zinc-100 px-2.5 py-1.5 text-xs outline-none ring-1 ring-zinc-200 focus:ring-blue-400"
+              aria-label="시작일"
+            />
+            <span className="text-zinc-400">~</span>
+            <input
+              type="date"
+              value={campaignEndDate}
+              onChange={(e) => setCampaignEndDate(e.target.value)}
+              min={campaignStartDate || undefined}
+              className="rounded-lg bg-zinc-100 px-2.5 py-1.5 text-xs outline-none ring-1 ring-zinc-200 focus:ring-blue-400"
+              aria-label="종료일"
+            />
+            {(campaignStartDate || campaignEndDate) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCampaignStartDate("");
+                  setCampaignEndDate("");
+                }}
+                className="text-zinc-400 hover:text-zinc-700"
+                aria-label="기간 지우기"
+              >
+                ×
+              </button>
+            )}
+          </div>
 
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <Field label="utm_source" required>
