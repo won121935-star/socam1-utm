@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Link2,
   Sparkles,
@@ -80,6 +80,32 @@ export default function Home() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [groupBy, setGroupBy] = useState<"none" | "campaign">("none");
+  type SortKey = "recent" | "oldest" | "clicks-desc" | "clicks-asc" | "name";
+  const [sortBy, setSortBy] = useState<SortKey>("recent");
+
+  const sortedLinks = useMemo(() => {
+    const arr = [...links];
+    switch (sortBy) {
+      case "recent":
+        arr.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        break;
+      case "oldest":
+        arr.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+        break;
+      case "clicks-desc":
+        arr.sort((a, b) => b.clickCount - a.clickCount);
+        break;
+      case "clicks-asc":
+        arr.sort((a, b) => a.clickCount - b.clickCount);
+        break;
+      case "name":
+        arr.sort((a, b) =>
+          (a.label ?? a.utmCampaign).localeCompare(b.label ?? b.utmCampaign),
+        );
+        break;
+    }
+    return arr;
+  }, [links, sortBy]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -499,39 +525,54 @@ export default function Home() {
           <h2 className="text-sm font-semibold text-zinc-600">
             저장된 링크 ({links.length})
           </h2>
-          <div className="flex items-center gap-1 rounded-full bg-zinc-100 p-1 ring-1 ring-zinc-200">
-            {(["none", "campaign"] as const).map((g) => (
-              <button
-                key={g}
-                type="button"
-                onClick={() => setGroupBy(g)}
-                className={cn(
-                  "rounded-full px-3 py-1 text-xs font-medium transition",
-                  groupBy === g
-                    ? "bg-white text-zinc-900 shadow-sm"
-                    : "text-zinc-500 hover:text-zinc-800",
-                )}
-              >
-                {g === "none" ? "리스트" : "📁 캠페인별"}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortKey)}
+              className="rounded-full bg-zinc-100 px-3 py-1.5 text-xs text-zinc-700 outline-none ring-1 ring-zinc-200 hover:bg-zinc-200"
+              title="정렬 기준"
+            >
+              <option value="recent">🕐 최신순</option>
+              <option value="oldest">🕐 오래된순</option>
+              <option value="clicks-desc">📈 클릭 많은순</option>
+              <option value="clicks-asc">📉 클릭 적은순</option>
+              <option value="name">🔤 이름순</option>
+            </select>
+            <div className="flex items-center gap-1 rounded-full bg-zinc-100 p-1 ring-1 ring-zinc-200">
+              {(["none", "campaign"] as const).map((g) => (
+                <button
+                  key={g}
+                  type="button"
+                  onClick={() => setGroupBy(g)}
+                  className={cn(
+                    "rounded-full px-3 py-1 text-xs font-medium transition",
+                    groupBy === g
+                      ? "bg-white text-zinc-900 shadow-sm"
+                      : "text-zinc-500 hover:text-zinc-800",
+                  )}
+                >
+                  {g === "none" ? "리스트" : "📁 캠페인별"}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
-        {links.length === 0 ? (
+        {sortedLinks.length === 0 ? (
           <div className="rounded-2xl bg-white py-12 text-center text-sm text-zinc-500">
             아직 저장된 링크가 없습니다. 위에서 첫 링크를 만들어보세요.
           </div>
         ) : groupBy === "campaign" ? (
           <GroupedView
-            links={links}
+            links={sortedLinks}
+            sortBy={sortBy}
             copiedId={copiedId}
             onCopy={copyShortLink}
             onDelete={deleteLink}
           />
         ) : (
           <div className="flex flex-col gap-2">
-            {links.map((l) => (
+            {sortedLinks.map((l) => (
               <LinkCard
                 key={l.id}
                 link={l}
@@ -551,16 +592,18 @@ const UNGROUPED = "__ungrouped__";
 
 function GroupedView({
   links,
+  sortBy,
   copiedId,
   onCopy,
   onDelete,
 }: {
   links: LinkRow[];
+  sortBy: "recent" | "oldest" | "clicks-desc" | "clicks-asc" | "name";
   copiedId: string | null;
   onCopy: (l: LinkRow) => void;
   onDelete: (id: string) => void;
 }) {
-  // 캠페인별로 묶기
+  // 캠페인별로 묶기 (links 는 이미 정렬되어 들어옴)
   const groups = new Map<string, { name: string; items: LinkRow[] }>();
   for (const l of links) {
     const key = l.campaign?.id ?? UNGROUPED;
@@ -568,10 +611,42 @@ function GroupedView({
     if (!groups.has(key)) groups.set(key, { name, items: [] });
     groups.get(key)!.items.push(l);
   }
-  // 캠페인 알파벳 순 (미지정은 마지막)
-  const ordered = [...groups.entries()]
-    .filter(([k]) => k !== UNGROUPED)
-    .sort((a, b) => a[1].name.localeCompare(b[1].name));
+  // 그룹 자체도 같은 sort 기준으로 정렬
+  const ordered = [...groups.entries()].filter(([k]) => k !== UNGROUPED);
+  ordered.sort(([, a], [, b]) => {
+    if (sortBy === "name") return a.name.localeCompare(b.name);
+    if (sortBy === "clicks-desc")
+      return (
+        b.items.reduce((s, l) => s + l.clickCount, 0) -
+        a.items.reduce((s, l) => s + l.clickCount, 0)
+      );
+    if (sortBy === "clicks-asc")
+      return (
+        a.items.reduce((s, l) => s + l.clickCount, 0) -
+        b.items.reduce((s, l) => s + l.clickCount, 0)
+      );
+    if (sortBy === "oldest") {
+      const minA = a.items.reduce(
+        (m, l) => (l.createdAt < m ? l.createdAt : m),
+        a.items[0].createdAt,
+      );
+      const minB = b.items.reduce(
+        (m, l) => (l.createdAt < m ? l.createdAt : m),
+        b.items[0].createdAt,
+      );
+      return minA.localeCompare(minB);
+    }
+    // recent: 그룹 내 가장 최신 링크 createdAt 기준
+    const maxA = a.items.reduce(
+      (m, l) => (l.createdAt > m ? l.createdAt : m),
+      a.items[0].createdAt,
+    );
+    const maxB = b.items.reduce(
+      (m, l) => (l.createdAt > m ? l.createdAt : m),
+      b.items[0].createdAt,
+    );
+    return maxB.localeCompare(maxA);
+  });
   if (groups.has(UNGROUPED)) ordered.push([UNGROUPED, groups.get(UNGROUPED)!]);
 
   return (
