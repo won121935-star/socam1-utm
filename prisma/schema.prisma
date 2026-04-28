@@ -1,0 +1,75 @@
+// UTM 캠페인 트래커 schema
+// SQLite (libsql) 호환, Turso 배포.
+
+generator client {
+  provider = "prisma-client"
+  output   = "./generated"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// 캠페인 — UTM 그룹핑 단위. (예: "2026 Spring 가전 광고")
+model Campaign {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  links       UtmLink[]
+}
+
+// UTM 파라미터가 붙은 링크. 모든 링크는 자동으로 단축 코드를 가짐.
+model UtmLink {
+  id           String   @id @default(cuid())
+  campaignId   String?
+  campaign     Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  // 입력 원본
+  baseUrl      String   // 사용자가 입력한 원본 URL (https://example.com/landing)
+  utmSource    String
+  utmMedium    String
+  utmCampaign  String
+  utmTerm      String?
+  utmContent   String?
+
+  // 결과
+  longUrl      String   // utm 파라미터 붙은 풀 URL
+  shortCode    String   @unique // /r/<code>
+
+  label        String?  // 사용자 라벨 (선택)
+  createdBy    String?  // 작성자 (자유 입력)
+  createdAt    DateTime @default(now())
+
+  clicks       Click[]
+
+  @@index([campaignId])
+  @@index([createdAt])
+  @@index([utmCampaign])
+  @@index([utmSource, utmMedium])
+}
+
+// 클릭 이벤트 — /r/<code> 가 호출될 때마다 1줄.
+model Click {
+  id         String   @id @default(cuid())
+  utmLinkId  String
+  link       UtmLink  @relation(fields: [utmLinkId], references: [id], onDelete: Cascade)
+  ipHash     String?  // IP를 SHA-256 해시 (개인정보 보호)
+  userAgent  String?
+  referrer   String?
+  country    String?  // Vercel geo 헤더에서 (있으면)
+  createdAt  DateTime @default(now())
+
+  @@index([utmLinkId, createdAt])
+}
+
+// Google Analytics 연결 — OAuth 토큰 저장 (단일 팀이라 1줄)
+model GaConnection {
+  id            String   @id @default(cuid())
+  accountEmail  String   // 인증한 구글 계정
+  refreshToken  String   // 장기 갱신 토큰
+  propertyId    String?  // 사용자가 선택한 GA4 property (G-XXXX 가 아닌 숫자 ID)
+  propertyName  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
