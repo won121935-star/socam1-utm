@@ -46,6 +46,8 @@ const createSchema = z.object({
   utmTerm: z.string().max(80).optional(),
   utmContent: z.string().max(80).optional(),
   campaignName: z.string().max(80).optional(),
+  campaignStartDate: z.string().optional(), // YYYY-MM-DD
+  campaignEndDate: z.string().optional(),
   label: z.string().max(120).optional(),
   createdBy: z.string().max(40).optional(),
 });
@@ -62,13 +64,24 @@ export async function POST(req: Request) {
   const d = parsed.data;
   const longUrl = buildUtmUrl(d);
 
-  // 캠페인 upsert (이름으로)
+  // 캠페인 upsert (이름으로) — 새 캠페인이면 기간 적용, 기존이면 기간 입력 시 업데이트
   let campaignId: string | undefined;
   if (d.campaignName?.trim()) {
+    const startDate = d.campaignStartDate
+      ? new Date(d.campaignStartDate)
+      : undefined;
+    const endDate = d.campaignEndDate ? new Date(d.campaignEndDate) : undefined;
     const c = await prisma.campaign.upsert({
       where: { name: d.campaignName.trim() },
-      update: {},
-      create: { name: d.campaignName.trim() },
+      update: {
+        ...(startDate ? { startDate } : {}),
+        ...(endDate ? { endDate } : {}),
+      },
+      create: {
+        name: d.campaignName.trim(),
+        ...(startDate ? { startDate } : {}),
+        ...(endDate ? { endDate } : {}),
+      },
     });
     campaignId = c.id;
   }

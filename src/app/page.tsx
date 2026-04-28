@@ -15,7 +15,14 @@ import {
 import NextLink from "next/link";
 import { cn } from "@/lib/cn";
 
-type CampaignSummary = { id: string; name: string; description: string | null; linkCount: number };
+type CampaignSummary = {
+  id: string;
+  name: string;
+  description: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  linkCount: number;
+};
 
 type LinkRow = {
   id: string;
@@ -55,6 +62,8 @@ export default function Home() {
   const [utmTerm, setUtmTerm] = useState("");
   const [utmContent, setUtmContent] = useState("");
   const [campaignName, setCampaignName] = useState("");
+  const [campaignStartDate, setCampaignStartDate] = useState("");
+  const [campaignEndDate, setCampaignEndDate] = useState("");
   const [label, setLabel] = useState("");
   const [createdBy, setCreatedBy] = useState(
     typeof window !== "undefined"
@@ -130,6 +139,8 @@ export default function Home() {
           utmTerm: utmTerm.trim() || undefined,
           utmContent: utmContent.trim() || undefined,
           campaignName: campaignName.trim() || undefined,
+          campaignStartDate: campaignStartDate || undefined,
+          campaignEndDate: campaignEndDate || undefined,
           label: label.trim() || undefined,
           createdBy: createdBy.trim() || undefined,
         }),
@@ -222,6 +233,32 @@ export default function Home() {
               </datalist>
             </Field>
           </div>
+
+          {/* 캠페인 기간 (그룹 입력 시에만 의미 있음) */}
+          {campaignName.trim() && (
+            <div className="grid grid-cols-2 gap-3 rounded-xl bg-zinc-50 p-3 ring-1 ring-zinc-200">
+              <Field label="📅 캠페인 시작일 (선택)">
+                <input
+                  type="date"
+                  value={campaignStartDate}
+                  onChange={(e) => setCampaignStartDate(e.target.value)}
+                  className="w-full rounded-xl bg-white px-3 py-2 text-sm outline-none ring-1 ring-zinc-200"
+                />
+              </Field>
+              <Field label="📅 캠페인 종료일 (선택)">
+                <input
+                  type="date"
+                  value={campaignEndDate}
+                  onChange={(e) => setCampaignEndDate(e.target.value)}
+                  min={campaignStartDate || undefined}
+                  className="w-full rounded-xl bg-white px-3 py-2 text-sm outline-none ring-1 ring-zinc-200"
+                />
+              </Field>
+              <p className="col-span-2 text-[10px] text-zinc-500">
+                기존 캠페인이면 입력한 날짜로 갱신, 새 캠페인이면 그대로 저장
+              </p>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <Field label="utm_source" required>
@@ -424,7 +461,13 @@ export default function Home() {
                 className="rounded-l-full pl-3 pr-1 py-1"
               >
                 {c.name}
-                <span className="ml-1 text-[10px] opacity-70">{c.linkCount}</span>
+                {(c.startDate || c.endDate) && (
+                  <span className="ml-1.5 text-[10px] opacity-70">
+                    ({c.startDate?.slice(5).replace("-", "/") ?? "?"}~
+                    {c.endDate?.slice(5).replace("-", "/") ?? "?"})
+                  </span>
+                )}
+                <span className="ml-1 text-[10px] opacity-70">·{c.linkCount}</span>
               </button>
               <button
                 type="button"

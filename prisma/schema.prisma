@@ -15,6 +15,8 @@ model Campaign {
   id          String   @id @default(cuid())
   name        String   @unique
   description String?
+  startDate   DateTime?
+  endDate     DateTime?
   createdAt   DateTime @default(now())
   links       UtmLink[]
 }
