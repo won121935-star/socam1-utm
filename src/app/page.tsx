@@ -195,16 +195,33 @@ export default function Home() {
           <Sparkles size={16} className="text-blue-600" /> 새 링크 만들기
         </h2>
         <form onSubmit={submit} className="flex flex-col gap-3">
-          <Field label="대상 URL" required>
-            <input
-              type="url"
-              required
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="https://example.com/landing"
-              className="w-full rounded-xl bg-zinc-100 px-3 py-2.5 text-sm outline-none placeholder:text-zinc-400"
-            />
-          </Field>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-[2fr_1fr]">
+            <Field label="대상 URL" required>
+              <input
+                type="url"
+                required
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                placeholder="https://example.com/landing"
+                className="w-full rounded-xl bg-zinc-100 px-3 py-2.5 text-sm outline-none placeholder:text-zinc-400"
+              />
+            </Field>
+            <Field label="📁 캠페인 그룹 (선택)">
+              <input
+                type="text"
+                list="campaign-list"
+                value={campaignName}
+                onChange={(e) => setCampaignName(e.target.value)}
+                placeholder="예: 2026 봄 런칭"
+                className="w-full rounded-xl bg-zinc-100 px-3 py-2.5 text-sm outline-none placeholder:text-zinc-400"
+              />
+              <datalist id="campaign-list">
+                {campaigns.map((c) => (
+                  <option key={c.id} value={c.name} />
+                ))}
+              </datalist>
+            </Field>
+          </div>
 
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <Field label="utm_source" required>
@@ -260,7 +277,7 @@ export default function Home() {
               size={12}
               className={cn("transition", advancedOpen && "rotate-180")}
             />
-            고급 옵션 (term / content / 캠페인 그룹 / 라벨 / 작성자)
+            고급 옵션 (term / content / 라벨 / 작성자)
           </button>
 
           {advancedOpen && (
@@ -280,15 +297,6 @@ export default function Home() {
                   value={utmContent}
                   onChange={(e) => setUtmContent(e.target.value)}
                   placeholder="A/B 테스트 변형 등"
-                  className="w-full rounded-xl bg-zinc-100 px-3 py-2 text-sm outline-none placeholder:text-zinc-400"
-                />
-              </Field>
-              <Field label="캠페인 그룹 (선택)">
-                <input
-                  type="text"
-                  value={campaignName}
-                  onChange={(e) => setCampaignName(e.target.value)}
-                  placeholder="예: 2026 봄 런칭"
                   className="w-full rounded-xl bg-zinc-100 px-3 py-2 text-sm outline-none placeholder:text-zinc-400"
                 />
               </Field>
