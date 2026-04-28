@@ -28,8 +28,8 @@ function ConnectedView({
   saving: boolean;
 }) {
   return (
-    <section className="rounded-2xl bg-zinc-900 p-5 ring-1 ring-zinc-800">
-      <div className="flex items-center gap-2 text-sm text-emerald-300">
+    <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200">
+      <div className="flex items-center gap-2 text-sm text-emerald-700">
         <Check size={14} />
         Google 계정 연결됨 ({state.accountEmail})
       </div>
@@ -54,7 +54,7 @@ function ConnectedView({
                   className={
                     selected
                       ? "flex items-center justify-between gap-2 rounded-xl bg-blue-600 px-3 py-2 text-left text-sm text-white"
-                      : "flex items-center justify-between gap-2 rounded-xl bg-zinc-800 px-3 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-700"
+                      : "flex items-center justify-between gap-2 rounded-xl bg-zinc-100 px-3 py-2 text-left text-sm text-zinc-800 hover:bg-zinc-200"
                   }
                 >
                   <span className="truncate">{p.displayName}</span>
@@ -69,12 +69,12 @@ function ConnectedView({
         )}
       </div>
 
-      <div className="mt-6 border-t border-zinc-800 pt-4">
+      <div className="mt-6 border-t border-zinc-200 pt-4">
         <button
           type="button"
           onClick={onDisconnect}
           disabled={saving}
-          className="inline-flex items-center gap-1 rounded-full border border-red-900/50 px-3 py-1.5 text-xs text-red-400 hover:bg-red-950/50"
+          className="inline-flex items-center gap-1 rounded-full border border-red-300 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
         >
           <LogOut size={12} /> 연결 해제
         </button>
@@ -142,7 +142,7 @@ export default function SettingsPage() {
       <header className="flex items-center justify-between">
         <Link
           href="/"
-          className="text-xs text-zinc-400 hover:text-zinc-200"
+          className="text-xs text-zinc-400 hover:text-zinc-800"
         >
           ← 메인
         </Link>
@@ -156,21 +156,21 @@ export default function SettingsPage() {
         <div
           className={
             notice.type === "ok"
-              ? "rounded-xl bg-emerald-950/40 px-3 py-2 text-xs text-emerald-300 ring-1 ring-emerald-900/50"
-              : "rounded-xl bg-red-950/50 px-3 py-2 text-xs text-red-300 ring-1 ring-red-900/50"
+              ? "rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700 ring-1 ring-emerald-200"
+              : "rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700 ring-1 ring-red-200"
           }
         >
           {notice.msg}
         </div>
       )}
 
-      <h2 className="text-sm font-semibold text-zinc-300">Google Analytics 4 연결</h2>
+      <h2 className="text-sm font-semibold text-zinc-700">Google Analytics 4 연결</h2>
 
       {state === null ? (
         <p className="text-sm text-zinc-500">상태 확인 중…</p>
       ) : !state.connected ? (
-        <section className="rounded-2xl bg-zinc-900 p-5 ring-1 ring-zinc-800">
-          <p className="mb-3 text-sm text-zinc-300">
+        <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200">
+          <p className="mb-3 text-sm text-zinc-700">
             아직 연결되지 않았습니다. 본인 GA 4 계정으로 한 번 로그인하면, 캠페인별 세션·사용자·전환 데이터를 이 사이트에서 직접 볼 수 있어요.
           </p>
           <a
@@ -193,8 +193,8 @@ export default function SettingsPage() {
       )}
 
       {/* 사용 안내 */}
-      <section className="rounded-2xl bg-zinc-900/70 p-5 ring-1 ring-zinc-800 text-xs text-zinc-400">
-        <h3 className="mb-2 text-sm font-semibold text-zinc-300">사용 안내</h3>
+      <section className="rounded-2xl bg-blue-50 p-5 ring-1 ring-zinc-200 text-xs text-zinc-400">
+        <h3 className="mb-2 text-sm font-semibold text-zinc-700">사용 안내</h3>
         <ol className="list-decimal space-y-1.5 pl-5">
           <li>위 [Google 계정으로 연결] 클릭 → 본인 GA 4 권한 있는 구글 계정 로그인</li>
           <li>analytics.readonly 권한 승인</li>

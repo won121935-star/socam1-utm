@@ -112,37 +112,37 @@ export default function LinkDetail({
       <header className="flex items-center gap-2 text-sm">
         <Link
           href="/"
-          className="inline-flex items-center gap-1 rounded-full bg-zinc-800 px-3 py-1.5 text-xs hover:bg-zinc-700"
+          className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-3 py-1.5 text-xs hover:bg-zinc-200"
         >
           <ArrowLeft size={12} /> 목록으로
         </Link>
       </header>
 
       {/* 링크 정보 */}
-      <section className="rounded-2xl bg-zinc-900 p-5 ring-1 ring-zinc-800">
+      <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200">
         {link.label && (
-          <h2 className="mb-2 text-lg font-semibold text-zinc-100">{link.label}</h2>
+          <h2 className="mb-2 text-lg font-semibold text-zinc-900">{link.label}</h2>
         )}
         <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-zinc-400">
           {link.campaign && (
-            <span className="rounded-full bg-purple-900/40 px-2 py-0.5 text-purple-200 ring-1 ring-purple-800/50">
+            <span className="rounded-full bg-purple-100 px-2 py-0.5 text-purple-800 ring-1 ring-purple-200">
               📁 {link.campaign.name}
             </span>
           )}
-          <span className="rounded-full bg-zinc-800 px-2 py-0.5">
+          <span className="rounded-full bg-zinc-100 px-2 py-0.5">
             {link.utmSource} / {link.utmMedium}
           </span>
-          <span className="rounded-full bg-zinc-800 px-2 py-0.5">{link.utmCampaign}</span>
+          <span className="rounded-full bg-zinc-100 px-2 py-0.5">{link.utmCampaign}</span>
           {link.utmContent && (
-            <span className="rounded-full bg-zinc-800 px-2 py-0.5">{link.utmContent}</span>
+            <span className="rounded-full bg-zinc-100 px-2 py-0.5">{link.utmContent}</span>
           )}
           {link.utmTerm && (
-            <span className="rounded-full bg-zinc-800 px-2 py-0.5">{link.utmTerm}</span>
+            <span className="rounded-full bg-zinc-100 px-2 py-0.5">{link.utmTerm}</span>
           )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <code className="rounded-lg bg-zinc-950 px-2 py-1 text-xs text-emerald-300">
+          <code className="rounded-lg bg-white px-2 py-1 text-xs text-emerald-700">
             {shortUrl}
           </code>
           <button
@@ -150,8 +150,8 @@ export default function LinkDetail({
             onClick={copyShort}
             className={
               copied
-                ? "inline-flex items-center gap-1 rounded-full bg-emerald-700 px-2.5 py-1 text-xs text-white"
-                : "inline-flex items-center gap-1 rounded-full bg-zinc-800 px-2.5 py-1 text-xs hover:bg-zinc-700"
+                ? "inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-xs text-white"
+                : "inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-1 text-xs hover:bg-zinc-200"
             }
           >
             {copied ? <Check size={12} /> : <Copy size={12} />}
@@ -161,12 +161,12 @@ export default function LinkDetail({
             href={link.longUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 rounded-full bg-zinc-800 px-2.5 py-1 text-xs hover:bg-zinc-700"
+            className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-1 text-xs hover:bg-zinc-200"
           >
             <ExternalLink size={12} /> 원본 열기
           </a>
         </div>
-        <div className="mt-2 break-all text-[11px] text-zinc-600">→ {link.longUrl}</div>
+        <div className="mt-2 break-all text-[11px] text-zinc-400">→ {link.longUrl}</div>
       </section>
 
       {/* 통계 */}
@@ -179,8 +179,8 @@ export default function LinkDetail({
           </section>
 
           {/* 일별 차트 — 단순 막대 */}
-          <section className="rounded-2xl bg-zinc-900 p-5 ring-1 ring-zinc-800">
-            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-zinc-300">
+          <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200">
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-zinc-700">
               <BarChart3 size={14} /> 최근 30일 클릭 추이
             </h3>
             {stats.byDay.length === 0 ? (
@@ -193,12 +193,12 @@ export default function LinkDetail({
                     className="flex flex-1 flex-col items-center justify-end gap-1"
                     title={`${d.date} — ${d.count} 클릭`}
                   >
-                    <div className="text-[9px] text-zinc-600">{d.count}</div>
+                    <div className="text-[9px] text-zinc-400">{d.count}</div>
                     <div
                       className="w-full rounded bg-blue-500/60 transition hover:bg-blue-500"
                       style={{ height: `${(d.count / maxDay) * 100}%` }}
                     />
-                    <div className="text-[8px] text-zinc-600">
+                    <div className="text-[8px] text-zinc-400">
                       {d.date.slice(5)}
                     </div>
                   </div>
@@ -208,8 +208,8 @@ export default function LinkDetail({
           </section>
 
           {/* 유입 referrer */}
-          <section className="rounded-2xl bg-zinc-900 p-5 ring-1 ring-zinc-800">
-            <h3 className="mb-3 text-sm font-semibold text-zinc-300">유입 referrer Top 10</h3>
+          <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200">
+            <h3 className="mb-3 text-sm font-semibold text-zinc-700">유입 referrer Top 10</h3>
             {stats.topReferrers.length === 0 ? (
               <p className="text-sm text-zinc-500">아직 데이터가 없습니다.</p>
             ) : (
@@ -219,8 +219,8 @@ export default function LinkDetail({
                     key={r.referrer}
                     className="flex items-center justify-between gap-2 text-xs"
                   >
-                    <code className="truncate text-zinc-300">{r.referrer}</code>
-                    <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-zinc-400">
+                    <code className="truncate text-zinc-700">{r.referrer}</code>
+                    <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-zinc-400">
                       {r.count}
                     </span>
                   </li>
@@ -232,16 +232,16 @@ export default function LinkDetail({
       )}
 
       {/* Google Analytics 섹션 */}
-      <section className="rounded-2xl bg-zinc-900 p-5 ring-1 ring-zinc-800">
-        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-zinc-300">
-          <LineChart size={14} className="text-orange-400" /> Google Analytics (랜딩 후 행동)
+      <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200">
+        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-zinc-700">
+          <LineChart size={14} className="text-orange-600" /> Google Analytics (랜딩 후 행동)
         </h3>
         {!ga ? (
           <p className="text-sm text-zinc-500">불러오는 중…</p>
         ) : !ga.connected ? (
           <p className="text-sm text-zinc-400">
             GA 연결되지 않았습니다.{" "}
-            <Link href="/settings" className="text-blue-400 underline">
+            <Link href="/settings" className="text-blue-600 underline">
               설정에서 연결
             </Link>
             하면 이 캠페인의 세션·체류시간·전환수가 여기 표시됩니다.
@@ -253,7 +253,7 @@ export default function LinkDetail({
               집계된 세션이 없습니다.
             </p>
             {ga.error && (
-              <p className="mt-2 text-xs text-red-400">에러: {ga.error}</p>
+              <p className="mt-2 text-xs text-red-600">에러: {ga.error}</p>
             )}
           </div>
         ) : (
@@ -264,7 +264,7 @@ export default function LinkDetail({
             {ga.rows.map((r, i) => (
               <div
                 key={i}
-                className="grid grid-cols-2 gap-2 rounded-xl bg-zinc-800/50 p-3 md:grid-cols-4"
+                className="grid grid-cols-2 gap-2 rounded-xl bg-zinc-50 p-3 md:grid-cols-4"
               >
                 <GaStat label="세션" value={r.sessions} />
                 <GaStat label="사용자" value={r.totalUsers} />
@@ -301,7 +301,7 @@ function GaStat({
   return (
     <div>
       <div className="text-[10px] text-zinc-500">{label}</div>
-      <div className="text-base font-semibold text-zinc-100">
+      <div className="text-base font-semibold text-zinc-900">
         {value.toLocaleString()}
         {suffix}
       </div>
@@ -319,12 +319,12 @@ function Stat({
   hint?: string;
 }) {
   return (
-    <div className="rounded-2xl bg-zinc-900 p-4 ring-1 ring-zinc-800">
+    <div className="rounded-2xl bg-white p-4 ring-1 ring-zinc-200">
       <div className="text-xs text-zinc-500">{label}</div>
-      <div className="mt-1 text-2xl font-semibold text-zinc-100">
+      <div className="mt-1 text-2xl font-semibold text-zinc-900">
         {value.toLocaleString()}
       </div>
-      {hint && <div className="mt-0.5 text-[10px] text-zinc-600">{hint}</div>}
+      {hint && <div className="mt-0.5 text-[10px] text-zinc-400">{hint}</div>}
     </div>
   );
 }
