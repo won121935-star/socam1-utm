@@ -221,13 +221,6 @@ export default function Home() {
         </NextLink>
       </header>
 
-      <div className="rounded-2xl bg-blue-50 px-4 py-3 text-sm text-zinc-700 ring-1 ring-zinc-200">
-        <p>UTM 파라미터 붙은 링크를 자동으로 만들고, 단축 URL로 클릭 수도 같이 추적합니다.</p>
-        <p className="mt-0.5 text-xs text-zinc-400">
-          단축 URL 클릭 시 해당 페이지로 자동 이동 + 클릭 카운트 누적
-        </p>
-      </div>
-
       <CampaignCalendar campaigns={campaigns} />
 
       <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200">

@@ -129,41 +129,41 @@ export function CampaignCalendar({
   }
 
   return (
-    <section className="rounded-2xl bg-white p-4 ring-1 ring-zinc-200">
+    <section className="mx-auto w-full max-w-md rounded-2xl bg-white p-3 ring-1 ring-zinc-200">
       {/* 헤더: 월 네비게이션 + 현재 시각 */}
-      <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1">
+      <header className="mb-2 flex flex-wrap items-center justify-between gap-1.5">
+        <div className="flex items-center gap-0.5">
           <button
             type="button"
             onClick={() => shiftMonth(-1)}
-            className="rounded-full p-1 hover:bg-zinc-100"
+            className="rounded-full p-0.5 hover:bg-zinc-100"
             aria-label="이전 달"
           >
-            <ChevronLeft size={14} />
+            <ChevronLeft size={12} />
           </button>
-          <span className="text-sm font-semibold text-zinc-800">
-            {year}년 {month + 1}월
+          <span className="text-xs font-semibold text-zinc-800">
+            {year}.{pad2(month + 1)}
           </span>
           <button
             type="button"
             onClick={() => shiftMonth(1)}
-            className="rounded-full p-1 hover:bg-zinc-100"
+            className="rounded-full p-0.5 hover:bg-zinc-100"
             aria-label="다음 달"
           >
-            <ChevronRight size={14} />
+            <ChevronRight size={12} />
           </button>
           {(viewMonth.y !== now.getFullYear() ||
             viewMonth.m !== now.getMonth()) && (
             <button
               type="button"
               onClick={goToday}
-              className="ml-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-700 hover:bg-zinc-200"
+              className="ml-1 rounded-full bg-zinc-100 px-1.5 py-0.5 text-[9px] font-medium text-zinc-700 hover:bg-zinc-200"
             >
-              오늘로
+              오늘
             </button>
           )}
         </div>
-        <div className="font-mono text-[11px] text-zinc-500">{nowFormatted}</div>
+        <div className="font-mono text-[10px] text-zinc-500">{nowFormatted}</div>
       </header>
 
       {/* 7-column 미니 달력 */}
@@ -172,7 +172,7 @@ export function CampaignCalendar({
           <div
             key={d}
             className={cn(
-              "py-1 text-[10px] font-medium",
+              "py-0.5 text-[9px] font-medium",
               i === 0 ? "text-red-500" : i === 6 ? "text-blue-500" : "text-zinc-500",
             )}
           >
@@ -181,20 +181,15 @@ export function CampaignCalendar({
         ))}
         {cells.map((cell, idx) => {
           if (!cell.day)
-            return <div key={idx} className="aspect-square" aria-hidden />;
+            return <div key={idx} className="min-h-[52px]" aria-hidden />;
           const isToday = cell.key === todayKey;
           const dayOfWeek = (firstDay + cell.day - 1) % 7;
           return (
             <div
               key={idx}
               className={cn(
-                "relative flex aspect-square flex-col items-center justify-start rounded-lg p-1 text-[11px] transition",
-                isToday
-                  ? "bg-blue-600 font-bold text-white"
-                  : "hover:bg-zinc-50",
-                !isToday && dayOfWeek === 0 && "text-red-500",
-                !isToday && dayOfWeek === 6 && "text-blue-500",
-                !isToday && dayOfWeek !== 0 && dayOfWeek !== 6 && "text-zinc-700",
+                "relative flex min-h-[52px] flex-col gap-0.5 rounded-md p-0.5 text-[10px] leading-tight transition",
+                isToday ? "bg-blue-50 ring-1 ring-blue-300" : "hover:bg-zinc-50",
               )}
               title={
                 cell.campaigns.length
@@ -203,19 +198,38 @@ export function CampaignCalendar({
                   : cell.key
               }
             >
-              <span>{cell.day}</span>
-              {/* 캠페인 막대 (최대 3개) */}
+              <span
+                className={cn(
+                  "self-center px-1 text-[10px] font-medium leading-none",
+                  isToday
+                    ? "rounded-full bg-blue-600 px-1.5 py-0.5 text-white"
+                    : dayOfWeek === 0
+                      ? "text-red-500"
+                      : dayOfWeek === 6
+                        ? "text-blue-500"
+                        : "text-zinc-700",
+                )}
+              >
+                {cell.day}
+              </span>
+              {/* 캠페인 바 (이름 포함, 최대 2개) */}
               {cell.campaigns.length > 0 && (
-                <div className="mt-auto flex w-full flex-col gap-0.5">
-                  {cell.campaigns.slice(0, 3).map((c) => (
+                <div className="flex flex-col gap-px">
+                  {cell.campaigns.slice(0, 2).map((c) => (
                     <div
                       key={c.id}
-                      className={cn("h-0.5 w-full rounded-full", colorFor(c.id).bar)}
-                    />
+                      className={cn(
+                        "truncate rounded-sm px-1 text-[8px] font-medium leading-tight",
+                        colorFor(c.id).chip,
+                      )}
+                      title={c.name}
+                    >
+                      {c.name}
+                    </div>
                   ))}
-                  {cell.campaigns.length > 3 && (
+                  {cell.campaigns.length > 2 && (
                     <div className="text-[7px] text-zinc-400">
-                      +{cell.campaigns.length - 3}
+                      +{cell.campaigns.length - 2}
                     </div>
                   )}
                 </div>
@@ -227,7 +241,7 @@ export function CampaignCalendar({
 
       {/* 진행 중 + 다가옴 */}
       {(ongoing.length > 0 || upcoming.length > 0) && (
-        <div className="mt-3 space-y-1.5 border-t border-zinc-100 pt-3 text-xs">
+        <div className="mt-2 space-y-1 border-t border-zinc-100 pt-2 text-[11px]">
           {ongoing.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-[10px] font-medium uppercase tracking-wide text-emerald-700">
