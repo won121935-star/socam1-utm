@@ -409,20 +409,44 @@ export default function Home() {
             전체 ({links.length})
           </button>
           {campaigns.map((c) => (
-            <button
+            <span
               key={c.id}
-              type="button"
-              onClick={() => setActiveCampaign(c.id)}
               className={cn(
-                "rounded-full px-3 py-1 text-xs",
+                "group inline-flex items-center gap-0.5 rounded-full text-xs transition",
                 activeCampaign === c.id
                   ? "bg-blue-600 text-white"
                   : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200",
               )}
             >
-              {c.name}
-              <span className="ml-1 text-[10px] opacity-70">{c.linkCount}</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => setActiveCampaign(c.id)}
+                className="rounded-l-full pl-3 pr-1 py-1"
+              >
+                {c.name}
+                <span className="ml-1 text-[10px] opacity-70">{c.linkCount}</span>
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (
+                    !confirm(
+                      `'${c.name}' 캠페인 그룹을 삭제할까요?\n(연결된 ${c.linkCount}개 링크는 그대로 유지되고 그룹만 사라져요)`,
+                    )
+                  )
+                    return;
+                  await fetch(`/api/campaigns/${c.id}`, { method: "DELETE" });
+                  if (activeCampaign === c.id) setActiveCampaign(null);
+                  refreshCampaigns();
+                  refreshLinks();
+                }}
+                className="rounded-r-full pr-2 pl-1 py-1 opacity-0 group-hover:opacity-70 hover:opacity-100"
+                aria-label={`${c.name} 캠페인 삭제`}
+                title="이 캠페인 그룹 삭제 (링크는 유지)"
+              >
+                ×
+              </button>
+            </span>
           ))}
         </div>
       )}
