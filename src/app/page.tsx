@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import NextLink from "next/link";
 import { cn } from "@/lib/cn";
+import { CampaignCalendar } from "@/components/CampaignCalendar";
 
 type CampaignSummary = {
   id: string;
@@ -226,6 +227,8 @@ export default function Home() {
           단축 URL 클릭 시 해당 페이지로 자동 이동 + 클릭 카운트 누적
         </p>
       </div>
+
+      <CampaignCalendar campaigns={campaigns} />
 
       <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200">
         <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold">
