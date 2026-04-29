@@ -10,7 +10,7 @@ import {
   Trash2,
   BarChart3,
   ChevronDown,
-  Settings as SettingsIcon,
+  BarChart3 as GaIcon,
   Pencil,
 } from "lucide-react";
 import NextLink from "next/link";
@@ -220,7 +220,7 @@ export default function Home() {
           href="/settings"
           className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-2 text-xs font-medium text-zinc-800 hover:bg-zinc-200"
         >
-          <SettingsIcon size={12} /> 설정
+          <GaIcon size={12} /> GA 연동
         </NextLink>
       </header>
 
