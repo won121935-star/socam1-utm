@@ -11,10 +11,12 @@ import {
   BarChart3,
   ChevronDown,
   Settings as SettingsIcon,
+  Pencil,
 } from "lucide-react";
 import NextLink from "next/link";
 import { cn } from "@/lib/cn";
 import { CampaignCalendar } from "@/components/CampaignCalendar";
+import { EditLinkDialog } from "@/components/EditLinkDialog";
 
 type CampaignSummary = {
   id: string;
@@ -81,6 +83,7 @@ export default function Home() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [groupBy, setGroupBy] = useState<"none" | "campaign">("none");
+  const [editingLink, setEditingLink] = useState<LinkRow | null>(null);
   type SortKey = "recent" | "oldest" | "clicks-desc" | "clicks-asc" | "name";
   const [sortBy, setSortBy] = useState<SortKey>("recent");
 
@@ -573,6 +576,7 @@ export default function Home() {
             copiedId={copiedId}
             onCopy={copyShortLink}
             onDelete={deleteLink}
+            onEdit={(l) => setEditingLink(l)}
           />
         ) : (
           <div className="flex flex-col gap-2">
@@ -583,11 +587,23 @@ export default function Home() {
                 copied={copiedId === l.id}
                 onCopy={() => copyShortLink(l)}
                 onDelete={() => deleteLink(l.id)}
+                onEdit={() => setEditingLink(l)}
               />
             ))}
           </div>
         )}
       </section>
+
+      {editingLink && (
+        <EditLinkDialog
+          link={editingLink}
+          campaignSuggestions={campaigns.map((c) => c.name)}
+          onClose={() => setEditingLink(null)}
+          onSaved={async () => {
+            await Promise.all([refreshLinks(), refreshCampaigns()]);
+          }}
+        />
+      )}
     </main>
   );
 }
@@ -600,12 +616,14 @@ function GroupedView({
   copiedId,
   onCopy,
   onDelete,
+  onEdit,
 }: {
   links: LinkRow[];
   sortBy: "recent" | "oldest" | "clicks-desc" | "clicks-asc" | "name";
   copiedId: string | null;
   onCopy: (l: LinkRow) => void;
   onDelete: (id: string) => void;
+  onEdit: (l: LinkRow) => void;
 }) {
   // 캠페인별로 묶기 (links 는 이미 정렬되어 들어옴)
   const groups = new Map<string, { name: string; items: LinkRow[] }>();
@@ -677,6 +695,7 @@ function GroupedView({
                 copied={copiedId === l.id}
                 onCopy={() => onCopy(l)}
                 onDelete={() => onDelete(l.id)}
+                onEdit={() => onEdit(l)}
               />
             ))}
           </div>
@@ -711,11 +730,13 @@ function LinkCard({
   copied,
   onCopy,
   onDelete,
+  onEdit,
 }: {
   link: LinkRow;
   copied: boolean;
   onCopy: () => void;
   onDelete: () => void;
+  onEdit?: () => void;
 }) {
   const shortUrl =
     typeof window !== "undefined"
@@ -785,6 +806,17 @@ function LinkCard({
             {new Date(link.createdAt).toLocaleDateString("ko-KR")}
           </div>
           <div className="flex gap-1">
+            {onEdit && (
+              <button
+                type="button"
+                onClick={onEdit}
+                className="rounded-full p-1.5 text-zinc-500 hover:bg-blue-50 hover:text-blue-600"
+                aria-label="수정"
+                title="링크 수정"
+              >
+                <Pencil size={14} />
+              </button>
+            )}
             <a
               href={link.longUrl}
               target="_blank"
