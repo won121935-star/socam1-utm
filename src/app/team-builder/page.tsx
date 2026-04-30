@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Upload,
   Download,
@@ -39,12 +39,14 @@ interface Person {
   group: string;
   name: string;
   phone: string; // 핸드폰 뒷자리
+  company: string; // 상호명 (선택)
 }
 
 interface TableSeat {
   group: string;
   name: string;
   phone: string;
+  company: string;
 }
 
 const SEATS_PER_TABLE = 8;
@@ -54,20 +56,8 @@ export default function TeamBuilder() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [numTables, setNumTables] = useState<number>(37);
-  const [companyName, setCompanyName] = useState<string>(
-    typeof window !== "undefined"
-      ? window.localStorage.getItem("teambuilder:companyName") ?? ""
-      : "",
-  );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
-
-  // 상호명 변경 시 localStorage 저장
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("teambuilder:companyName", companyName);
-    }
-  }, [companyName]);
 
   function handleFile(file: File) {
     setError(null);
@@ -90,12 +80,17 @@ export default function TeamBuilder() {
           const phoneKey = Object.keys(r).find((k) =>
             /핸드폰|폰|뒷|연락처|전화|phone|mobile|tel/i.test(k),
           );
+          // Find 상호명 / 업체 / company column
+          const companyKey = Object.keys(r).find((k) =>
+            /상호|업체|회사|company|brand|소속/i.test(k),
+          );
           if (!groupKey || !nameKey) continue;
           const group = String(r[groupKey] ?? "").trim();
           const name = String(r[nameKey] ?? "").trim();
           const phone = phoneKey ? String(r[phoneKey] ?? "").trim() : "";
+          const company = companyKey ? String(r[companyKey] ?? "").trim() : "";
           if (!group || !name) continue;
-          parsed.push({ group, name, phone });
+          parsed.push({ group, name, phone, company });
         }
         if (parsed.length === 0) {
           setError(
@@ -236,10 +231,13 @@ export default function TeamBuilder() {
     if (people.length === 0) return null;
 
     // 조별로 묶기
-    const groupsMap = new Map<string, { name: string; phone: string }[]>();
+    const groupsMap = new Map<
+      string,
+      { name: string; phone: string; company: string }[]
+    >();
     for (const p of people) {
       if (!groupsMap.has(p.group)) groupsMap.set(p.group, []);
-      groupsMap.get(p.group)!.push({ name: p.name, phone: p.phone });
+      groupsMap.get(p.group)!.push({ name: p.name, phone: p.phone, company: p.company });
     }
     // 조를 인원 수 내림차순으로 정렬
     const groups = [...groupsMap.entries()]
@@ -293,6 +291,7 @@ export default function TeamBuilder() {
                 group: g.name,
                 name: m.name,
                 phone: m.phone,
+                company: m.company,
               });
             }
             if (!placedTables.includes(bestIdx + 1))
@@ -317,6 +316,7 @@ export default function TeamBuilder() {
                   group: g.name,
                   name: m.name,
                   phone: m.phone,
+                  company: m.company,
                 });
               }
               remaining = 0;
@@ -329,6 +329,7 @@ export default function TeamBuilder() {
                 group: g.name,
                 name: m.name,
                 phone: m.phone,
+                company: m.company,
               });
             }
             if (!placedTables.includes(mostIdx + 1))
@@ -347,33 +348,29 @@ export default function TeamBuilder() {
 
   function downloadExcel() {
     if (!assignment) return;
-    const company = companyName.trim();
     const rows: {
-      테이블NO: number | string;
+      테이블번호: number | string;
       이름: string;
-      조번호: string;
-      "핸드폰 뒷자리": string;
       상호명: string;
+      "핸드폰 뒷자리": string;
     }[] = [];
     assignment.tables.forEach((seats, i) => {
       for (const s of seats) {
         rows.push({
-          테이블NO: i + 1,
+          테이블번호: i + 1,
           이름: s.name,
-          조번호: s.group,
+          상호명: s.company,
           "핸드폰 뒷자리": s.phone,
-          상호명: company,
         });
       }
     });
     if (assignment.overflow.length > 0) {
       for (const s of assignment.overflow) {
         rows.push({
-          테이블NO: "(좌석부족)",
+          테이블번호: "(좌석부족)",
           이름: s.name,
-          조번호: s.group,
+          상호명: s.company,
           "핸드폰 뒷자리": s.phone,
-          상호명: company,
         });
       }
     }
@@ -417,9 +414,9 @@ export default function TeamBuilder() {
 
       <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200">
         <h2 className="mb-3 text-sm font-semibold text-zinc-700">
-          1️⃣ 기본 설정
+          1️⃣ 테이블 수량 설정
         </h2>
-        <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
+        <div className="flex flex-wrap items-center gap-3">
           <label className="inline-flex items-center gap-2 text-sm text-zinc-700">
             테이블 수
             <input
@@ -434,19 +431,6 @@ export default function TeamBuilder() {
             />
             <span className="text-xs text-zinc-500">개 (각 {SEATS_PER_TABLE}명)</span>
           </label>
-          <label className="inline-flex items-center gap-2 text-sm text-zinc-700">
-            상호명 (선택)
-            <input
-              type="text"
-              value={companyName}
-              onChange={(e) => setCompanyName(e.target.value)}
-              placeholder="예: 소캠1팀"
-              className="w-48 rounded-xl bg-zinc-100 px-3 py-1.5 text-sm outline-none placeholder:text-zinc-400"
-            />
-          </label>
-          <span className="text-xs text-zinc-400">
-            * 엑셀·이미지 출력 끝에 표시됨
-          </span>
         </div>
       </section>
 
@@ -455,7 +439,7 @@ export default function TeamBuilder() {
           2️⃣ 엑셀 업로드
         </h2>
         <p className="mb-3 text-xs text-zinc-500">
-          엑셀 파일에 <code>이름</code>, <code>조번호</code>(또는 조/그룹), <code>핸드폰 뒷자리</code> 컬럼이 있어야 합니다. 첫 행이 헤더.
+          엑셀 파일에 <code>조번호</code>, <code>이름</code>, <code>상호명</code>(선택), <code>핸드폰 뒷자리</code> 컬럼이 있어야 합니다. 첫 행이 헤더, 컬럼 순서는 자유.
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-500">
@@ -490,25 +474,29 @@ export default function TeamBuilder() {
           <table className="mt-3 w-fit border-collapse text-[11px]">
             <thead>
               <tr>
-                <th className="border border-zinc-300 bg-white px-3 py-1 text-left">이름</th>
                 <th className="border border-zinc-300 bg-white px-3 py-1 text-left">조번호</th>
+                <th className="border border-zinc-300 bg-white px-3 py-1 text-left">이름</th>
+                <th className="border border-zinc-300 bg-white px-3 py-1 text-left">상호명</th>
                 <th className="border border-zinc-300 bg-white px-3 py-1 text-left">핸드폰 뒷자리</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td className="border border-zinc-300 px-3 py-1">홍길동</td>
                 <td className="border border-zinc-300 px-3 py-1">A</td>
+                <td className="border border-zinc-300 px-3 py-1">홍길동</td>
+                <td className="border border-zinc-300 px-3 py-1">까페 모카</td>
                 <td className="border border-zinc-300 px-3 py-1">1234</td>
               </tr>
               <tr>
-                <td className="border border-zinc-300 px-3 py-1">김철수</td>
                 <td className="border border-zinc-300 px-3 py-1">A</td>
+                <td className="border border-zinc-300 px-3 py-1">김철수</td>
+                <td className="border border-zinc-300 px-3 py-1">까페 모카</td>
                 <td className="border border-zinc-300 px-3 py-1">5678</td>
               </tr>
               <tr>
-                <td className="border border-zinc-300 px-3 py-1">박영희</td>
                 <td className="border border-zinc-300 px-3 py-1">B</td>
+                <td className="border border-zinc-300 px-3 py-1">박영희</td>
+                <td className="border border-zinc-300 px-3 py-1">맛집 김밥</td>
                 <td className="border border-zinc-300 px-3 py-1">9012</td>
               </tr>
             </tbody>
@@ -615,16 +603,14 @@ export default function TeamBuilder() {
             )}
 
             <div ref={resultRef} className="bg-white p-3">
-              {companyName.trim() && (
-                <div className="mb-3 flex items-baseline justify-between border-b border-zinc-200 pb-2">
-                  <h3 className="text-sm font-bold text-zinc-800">
-                    {companyName} 테이블 배정표
-                  </h3>
-                  <span className="text-[11px] text-zinc-500">
-                    {new Date().toLocaleDateString("ko-KR")} · 총 {people.length}명
-                  </span>
-                </div>
-              )}
+              <div className="mb-3 flex items-baseline justify-between border-b border-zinc-200 pb-2">
+                <h3 className="text-sm font-bold text-zinc-800">
+                  테이블 배정표
+                </h3>
+                <span className="text-[11px] text-zinc-500">
+                  {new Date().toLocaleDateString("ko-KR")} · 총 {people.length}명
+                </span>
+              </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {assignment.tables.map((seats, i) => {
                 if (seats.length === 0) {
@@ -645,11 +631,15 @@ export default function TeamBuilder() {
                 // 같은 테이블 안에서 조별로 묶어서 보여주기 (members로 phone까지)
                 const byGroup = new Map<
                   string,
-                  { name: string; phone: string }[]
+                  { name: string; phone: string; company: string }[]
                 >();
                 for (const s of seats) {
                   if (!byGroup.has(s.group)) byGroup.set(s.group, []);
-                  byGroup.get(s.group)!.push({ name: s.name, phone: s.phone });
+                  byGroup.get(s.group)!.push({
+                    name: s.name,
+                    phone: s.phone,
+                    company: s.company,
+                  });
                 }
                 const isFull = seats.length === SEATS_PER_TABLE;
                 return (
@@ -688,7 +678,7 @@ export default function TeamBuilder() {
                                 key={idx}
                                 className="flex items-baseline justify-between rounded-md bg-zinc-50 px-2 py-1 text-sm"
                               >
-                                <span className="flex items-baseline gap-1.5">
+                                <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
                                   <span
                                     className={
                                       "shrink-0 rounded px-1 py-0.5 text-[10px] font-bold " +
@@ -697,12 +687,17 @@ export default function TeamBuilder() {
                                   >
                                     {g}조
                                   </span>
-                                  <span className="font-medium text-zinc-800">
+                                  <span className="truncate font-medium text-zinc-800">
                                     {m.name}
                                   </span>
+                                  {m.company && (
+                                    <span className="truncate text-[11px] text-zinc-500">
+                                      · {m.company}
+                                    </span>
+                                  )}
                                 </span>
                                 {m.phone && (
-                                  <span className="font-mono text-[11px] text-zinc-500">
+                                  <span className="shrink-0 font-mono text-[11px] text-zinc-500">
                                     {m.phone}
                                   </span>
                                 )}
@@ -716,11 +711,6 @@ export default function TeamBuilder() {
                 );
               })}
               </div>
-              {companyName.trim() && (
-                <div className="mt-4 border-t border-zinc-200 pt-2 text-center text-[11px] text-zinc-500">
-                  © {companyName}
-                </div>
-              )}
             </div>
           </section>
         </>
