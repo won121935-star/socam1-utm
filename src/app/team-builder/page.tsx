@@ -493,8 +493,18 @@ export default function TeamBuilder() {
                                 key={idx}
                                 className="flex items-baseline justify-between rounded-md bg-zinc-50 px-2 py-1 text-sm"
                               >
-                                <span className="font-medium text-zinc-800">
-                                  {m.name}
+                                <span className="flex items-baseline gap-1.5">
+                                  <span
+                                    className={
+                                      "shrink-0 rounded px-1 py-0.5 text-[10px] font-bold " +
+                                      colorForGroup(g)
+                                    }
+                                  >
+                                    {g}조
+                                  </span>
+                                  <span className="font-medium text-zinc-800">
+                                    {m.name}
+                                  </span>
                                 </span>
                                 {m.phone && (
                                   <span className="font-mono text-[11px] text-zinc-500">
