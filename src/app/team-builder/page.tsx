@@ -59,6 +59,7 @@ export default function TeamBuilder() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [numTables, setNumTables] = useState<number>(37);
+  const [shuffleSeed, setShuffleSeed] = useState<number>(1);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
 
@@ -257,12 +258,33 @@ export default function TeamBuilder() {
     type Member = { name: string; phone: string; company: string };
     type Atom = { group: string; members: Member[] };
 
+    // seed 기반 PRNG (shuffleSeed 가 같으면 같은 결과, 다르면 다른 배치)
+    let seed = shuffleSeed | 0 || 1;
+    function rand(): number {
+      let t = (seed += 0x6d2b79f5);
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    }
+    function shuffle<T>(arr: T[]): T[] {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(rand() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
     const groupsMap = new Map<string, Member[]>();
     for (const p of people) {
       if (!groupsMap.has(p.group)) groupsMap.set(p.group, []);
       groupsMap
         .get(p.group)!
         .push({ name: p.name, phone: p.phone, company: p.company });
+    }
+    // 그룹 내 멤버 순서 셔플 (같은 조 안에서 누가 어느 청크로 갈지 다양화)
+    for (const [name, members] of groupsMap) {
+      groupsMap.set(name, shuffle(members));
     }
     const groupTotalSize = (g: string) => groupsMap.get(g)?.length ?? 0;
 
@@ -300,8 +322,8 @@ export default function TeamBuilder() {
       table.push({ group, name: m.name, phone: m.phone, company: m.company });
     }
 
-    // 2. FFD - bigAtoms 배치
-    const queue: Atom[] = [...bigAtoms].sort(
+    // 2. FFD - bigAtoms 배치 (셔플 후 size desc 정렬 — 동일 size 내에서 순서 랜덤화)
+    const queue: Atom[] = shuffle(bigAtoms).sort(
       (a, b) => b.members.length - a.members.length,
     );
     while (queue.length > 0) {
@@ -444,7 +466,6 @@ export default function TeamBuilder() {
         if (moved) break;
 
         // 2) Swap: i 의 P (조 g) ↔ j 의 K (조 H, H≠g). 새로운 solo 안 만드는 조건만.
-        const P = tables[i][seatIdx];
         const countsI = new Map<string, number>();
         for (const s of tables[i])
           countsI.set(s.group, (countsI.get(s.group) ?? 0) + 1);
@@ -468,6 +489,7 @@ export default function TeamBuilder() {
             // K 가 j 에서 빠지면 j 의 H = hAtJ - 1. 이 값이 1 이면 새 solo (H가 1인 조 제외)
             if (hAtJ === 2 && groupTotalSize(H) > 1) continue;
 
+            const P = tables[i][seatIdx];
             tables[i][seatIdx] = K;
             tables[j][k] = P;
             changed = true;
@@ -476,6 +498,47 @@ export default function TeamBuilder() {
           }
         }
         if (swapped) break;
+
+        // 3) 3-way 체인 이동:
+        //    i 에서 X(조 H≠g) 한 명을 m 으로 보내 자리 1 만들고,
+        //    j 의 Q(조 g)를 i 로 옮겨 P 와 합쳐 solo 해소.
+        //    조건: H@i ≥ 3 (i 에서 X 빠져도 solo 안 남), G@j ≥ 3 (j 에서 Q 빠져도 solo 안 남),
+        //         H@m ≥ 1 (m 에서 X 가 새 solo 안 됨).
+        let chained = false;
+        for (let j = 0; j < tables.length && !chained; j++) {
+          if (j === i) continue;
+          const gAtJ = tables[j].filter((s) => s.group === g).length;
+          if (gAtJ < 3) continue;
+
+          for (let xIdx = 0; xIdx < tables[i].length && !chained; xIdx++) {
+            const X = tables[i][xIdx];
+            if (X.group === g) continue;
+            const H = X.group;
+            const hAtI = countsI.get(H) ?? 0;
+            if (hAtI < 3 && groupTotalSize(H) > 1) continue;
+
+            for (let m = 0; m < tables.length; m++) {
+              if (m === i || m === j) continue;
+              if (SEATS_PER_TABLE - tables[m].length < 1) continue;
+              const hAtM = tables[m].filter((s) => s.group === H).length;
+              if (hAtM < 1 && groupTotalSize(H) > 1) continue;
+
+              const qIdx = tables[j].findIndex((s) => s.group === g);
+              if (qIdx === -1) continue;
+
+              const Xseat = tables[i][xIdx];
+              const Qseat = tables[j][qIdx];
+              tables[i][xIdx] = Qseat;
+              tables[j].splice(qIdx, 1);
+              tables[m].push(Xseat);
+
+              changed = true;
+              chained = true;
+              break;
+            }
+          }
+        }
+        if (chained) break;
       }
 
       if (!changed) break;
@@ -506,7 +569,7 @@ export default function TeamBuilder() {
       remainingSolos,
       singletonGroups: singletonGroupNames,
     };
-  }, [people, numTables]);
+  }, [people, numTables, shuffleSeed]);
 
   function downloadExcel() {
     if (!assignment) return;
@@ -723,7 +786,7 @@ export default function TeamBuilder() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setPeople([...people])}
+                  onClick={() => setShuffleSeed(Date.now())}
                   className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-3 py-1.5 text-xs hover:bg-zinc-200"
                 >
                   <Shuffle size={12} /> 다시 계산
