@@ -132,74 +132,79 @@ export default function TeamBuilder() {
       );
     }
 
-    // 정책: 각 조(청크)는 자기 테이블 통째로 사용 — 다른 조와 섞지 않음.
-    // 빈 테이블이 모자라면 그때만 같은 테이블에 추가 그룹 들어감 (warning).
+    // 정책: Best-Fit Decreasing — 청크가 통째로 들어가는 "가장 작은 빈 자리"
+    // 우선 선택 → 자연스럽게 4+4 처럼 같은 테이블에 모여서 8명 채움.
+    // 통째로 들어갈 곳 없으면 가장 빈 자리 많은 테이블에 부분 채움.
+    // 모든 좌석 다 찰 때만 overflow.
     for (const g of groups) {
       const chunks = evenChunks(g.members.length);
       const placedTables: number[] = [];
       let memberIdx = 0;
 
       for (const chunkSize of chunks) {
-        // 1순위: 빈 테이블 (한 조 = 한 테이블 원칙)
-        let targetIdx = tables.findIndex((t) => t.length === 0);
-        if (targetIdx === -1) {
-          // 2순위: 청크가 통째로 들어가는 가장 작은 잔여 자리 (Best Fit, 부득이하게 섞음)
+        let remaining = chunkSize;
+
+        while (remaining > 0) {
+          // Best Fit: 통째로 들어가는 가장 작은 잔여 자리
           let bestIdx = -1;
           let bestSpace = Infinity;
           for (let i = 0; i < tables.length; i++) {
             const sp = SEATS_PER_TABLE - tables[i].length;
-            if (sp >= chunkSize && sp < bestSpace) {
+            if (sp > 0 && sp >= remaining && sp < bestSpace) {
               bestIdx = i;
               bestSpace = sp;
             }
           }
-          targetIdx = bestIdx;
-        }
 
-        if (targetIdx === -1) {
-          // 자리 없음 — overflow
-          for (let j = 0; j < chunkSize; j++) {
-            const m = g.members[memberIdx++];
-            overflow.push({ group: g.name, name: m.name, phone: m.phone });
-          }
-          continue;
-        }
-
-        const cap = SEATS_PER_TABLE - tables[targetIdx].length;
-        const placedSize = Math.min(chunkSize, cap);
-        for (let j = 0; j < placedSize; j++) {
-          const m = g.members[memberIdx++];
-          tables[targetIdx].push({
-            group: g.name,
-            name: m.name,
-            phone: m.phone,
-          });
-        }
-        placedTables.push(targetIdx + 1);
-        if (placedSize < chunkSize) {
-          // 청크 일부 못 들어감 — 남은 만큼 같은 조 끼리 다음 빈 테이블로
-          let leftover = chunkSize - placedSize;
-          while (leftover > 0) {
-            const nextIdx = tables.findIndex((t) => t.length < SEATS_PER_TABLE);
-            if (nextIdx === -1) {
-              for (let j = 0; j < leftover; j++) {
-                const m = g.members[memberIdx++];
-                overflow.push({ group: g.name, name: m.name, phone: m.phone });
-              }
-              break;
-            }
-            const c2 = SEATS_PER_TABLE - tables[nextIdx].length;
-            const ps = Math.min(leftover, c2);
-            for (let j = 0; j < ps; j++) {
+          if (bestIdx !== -1) {
+            // 통째로 들어감
+            for (let j = 0; j < remaining; j++) {
               const m = g.members[memberIdx++];
-              tables[nextIdx].push({
+              tables[bestIdx].push({
                 group: g.name,
                 name: m.name,
                 phone: m.phone,
               });
             }
-            placedTables.push(nextIdx + 1);
-            leftover -= ps;
+            if (!placedTables.includes(bestIdx + 1))
+              placedTables.push(bestIdx + 1);
+            remaining = 0;
+          } else {
+            // 통째로 안 들어가면 가장 빈 자리 많은 테이블에 부분 채우기
+            let mostIdx = -1;
+            let mostSpace = 0;
+            for (let i = 0; i < tables.length; i++) {
+              const sp = SEATS_PER_TABLE - tables[i].length;
+              if (sp > mostSpace) {
+                mostSpace = sp;
+                mostIdx = i;
+              }
+            }
+            if (mostIdx === -1) {
+              // 진짜 자리 없음
+              for (let j = 0; j < remaining; j++) {
+                const m = g.members[memberIdx++];
+                overflow.push({
+                  group: g.name,
+                  name: m.name,
+                  phone: m.phone,
+                });
+              }
+              remaining = 0;
+              break;
+            }
+            const ps = mostSpace;
+            for (let j = 0; j < ps; j++) {
+              const m = g.members[memberIdx++];
+              tables[mostIdx].push({
+                group: g.name,
+                name: m.name,
+                phone: m.phone,
+              });
+            }
+            if (!placedTables.includes(mostIdx + 1))
+              placedTables.push(mostIdx + 1);
+            remaining -= ps;
           }
         }
       }
