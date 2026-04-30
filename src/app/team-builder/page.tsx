@@ -678,7 +678,7 @@ export default function TeamBuilder() {
                                 key={idx}
                                 className="flex items-baseline justify-between rounded-md bg-zinc-50 px-2 py-1 text-sm"
                               >
-                                <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                                <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
                                   <span
                                     className={
                                       "shrink-0 rounded px-1 py-0.5 text-[10px] font-bold " +
@@ -687,11 +687,11 @@ export default function TeamBuilder() {
                                   >
                                     {g}조
                                   </span>
-                                  <span className="truncate font-medium text-zinc-800">
+                                  <span className="font-medium text-zinc-800">
                                     {m.name}
                                   </span>
                                   {m.company && (
-                                    <span className="truncate text-[11px] text-zinc-500">
+                                    <span className="text-[11px] text-zinc-500">
                                       · {m.company}
                                     </span>
                                   )}
