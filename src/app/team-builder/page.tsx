@@ -15,11 +15,13 @@ import * as XLSX from "xlsx";
 interface Person {
   group: string;
   name: string;
+  phone: string; // 핸드폰 뒷자리
 }
 
 interface TableSeat {
   group: string;
   name: string;
+  phone: string;
 }
 
 const MAX_TABLES = 37;
@@ -42,21 +44,26 @@ export default function TeamBuilder() {
         const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws);
         const parsed: Person[] = [];
         for (const r of rows) {
-          // Find 조 / 그룹 / group / team-like column
+          // Find 조번호 / 그룹 / group / team-like column
           const groupKey = Object.keys(r).find((k) =>
-            /조|그룹|group|team|반/i.test(k),
+            /조번호|조|그룹|group|team|반/i.test(k),
           );
           // Find 이름 / name column
           const nameKey = Object.keys(r).find((k) => /이름|성명|name/i.test(k));
+          // Find 핸드폰 뒷자리 column
+          const phoneKey = Object.keys(r).find((k) =>
+            /핸드폰|폰|뒷|연락처|전화|phone|mobile|tel/i.test(k),
+          );
           if (!groupKey || !nameKey) continue;
           const group = String(r[groupKey] ?? "").trim();
           const name = String(r[nameKey] ?? "").trim();
+          const phone = phoneKey ? String(r[phoneKey] ?? "").trim() : "";
           if (!group || !name) continue;
-          parsed.push({ group, name });
+          parsed.push({ group, name, phone });
         }
         if (parsed.length === 0) {
           setError(
-            "조와 이름 컬럼을 찾을 수 없습니다. 첫 행이 헤더(예: '조', '이름')여야 합니다.",
+            "이름·조번호·핸드폰 컬럼을 찾을 수 없습니다. 첫 행이 헤더여야 합니다 (예: '이름', '조번호', '핸드폰 뒷자리').",
           );
           return;
         }
@@ -76,10 +83,10 @@ export default function TeamBuilder() {
     if (people.length === 0) return null;
 
     // 조별로 묶기
-    const groupsMap = new Map<string, string[]>();
+    const groupsMap = new Map<string, { name: string; phone: string }[]>();
     for (const p of people) {
       if (!groupsMap.has(p.group)) groupsMap.set(p.group, []);
-      groupsMap.get(p.group)!.push(p.name);
+      groupsMap.get(p.group)!.push({ name: p.name, phone: p.phone });
     }
     // 조를 인원 수 내림차순으로 정렬
     const groups = [...groupsMap.entries()]
@@ -110,8 +117,12 @@ export default function TeamBuilder() {
 
         if (bestIdx !== -1) {
           // 통째로 배정
-          for (const name of remaining) {
-            tables[bestIdx].push({ group: g.name, name });
+          for (const m of remaining) {
+            tables[bestIdx].push({
+              group: g.name,
+              name: m.name,
+              phone: m.phone,
+            });
           }
           placedTables.push(bestIdx + 1);
           remaining = [];
@@ -124,12 +135,17 @@ export default function TeamBuilder() {
           const cap = space(mostIdx);
           if (cap === 0) {
             // 자리 없음 — overflow
-            for (const n of remaining) overflow.push({ group: g.name, name: n });
+            for (const m of remaining)
+              overflow.push({ group: g.name, name: m.name, phone: m.phone });
             remaining = [];
           } else {
             const taken = remaining.splice(0, cap);
-            for (const name of taken) {
-              tables[mostIdx].push({ group: g.name, name });
+            for (const m of taken) {
+              tables[mostIdx].push({
+                group: g.name,
+                name: m.name,
+                phone: m.phone,
+              });
             }
             placedTables.push(mostIdx + 1);
           }
@@ -145,15 +161,30 @@ export default function TeamBuilder() {
 
   function downloadExcel() {
     if (!assignment) return;
-    const rows: { 테이블: number; 조: string; 이름: string }[] = [];
+    const rows: {
+      테이블NO: number | string;
+      이름: string;
+      조번호: string;
+      "핸드폰 뒷자리": string;
+    }[] = [];
     assignment.tables.forEach((seats, i) => {
       for (const s of seats) {
-        rows.push({ 테이블: i + 1, 조: s.group, 이름: s.name });
+        rows.push({
+          테이블NO: i + 1,
+          이름: s.name,
+          조번호: s.group,
+          "핸드폰 뒷자리": s.phone,
+        });
       }
     });
     if (assignment.overflow.length > 0) {
       for (const s of assignment.overflow) {
-        rows.push({ 테이블: 0, 조: s.group, 이름: s.name });
+        rows.push({
+          테이블NO: "(좌석부족)",
+          이름: s.name,
+          조번호: s.group,
+          "핸드폰 뒷자리": s.phone,
+        });
       }
     }
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -218,22 +249,26 @@ export default function TeamBuilder() {
           <table className="mt-3 w-fit border-collapse text-[11px]">
             <thead>
               <tr>
-                <th className="border border-zinc-300 bg-white px-3 py-1 text-left">조</th>
                 <th className="border border-zinc-300 bg-white px-3 py-1 text-left">이름</th>
+                <th className="border border-zinc-300 bg-white px-3 py-1 text-left">조번호</th>
+                <th className="border border-zinc-300 bg-white px-3 py-1 text-left">핸드폰 뒷자리</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td className="border border-zinc-300 px-3 py-1">A</td>
                 <td className="border border-zinc-300 px-3 py-1">홍길동</td>
-              </tr>
-              <tr>
                 <td className="border border-zinc-300 px-3 py-1">A</td>
-                <td className="border border-zinc-300 px-3 py-1">김철수</td>
+                <td className="border border-zinc-300 px-3 py-1">1234</td>
               </tr>
               <tr>
-                <td className="border border-zinc-300 px-3 py-1">B</td>
+                <td className="border border-zinc-300 px-3 py-1">김철수</td>
+                <td className="border border-zinc-300 px-3 py-1">A</td>
+                <td className="border border-zinc-300 px-3 py-1">5678</td>
+              </tr>
+              <tr>
                 <td className="border border-zinc-300 px-3 py-1">박영희</td>
+                <td className="border border-zinc-300 px-3 py-1">B</td>
+                <td className="border border-zinc-300 px-3 py-1">9012</td>
               </tr>
             </tbody>
           </table>
@@ -304,7 +339,8 @@ export default function TeamBuilder() {
                 const byGroup = new Map<string, string[]>();
                 for (const s of seats) {
                   if (!byGroup.has(s.group)) byGroup.set(s.group, []);
-                  byGroup.get(s.group)!.push(s.name);
+                  const display = s.phone ? `${s.name} (${s.phone})` : s.name;
+                  byGroup.get(s.group)!.push(display);
                 }
                 return (
                   <div
