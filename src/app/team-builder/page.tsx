@@ -47,13 +47,13 @@ interface TableSeat {
   phone: string;
 }
 
-const MAX_TABLES = 37;
 const SEATS_PER_TABLE = 8;
 
 export default function TeamBuilder() {
   const [people, setPeople] = useState<Person[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [numTables, setNumTables] = useState<number>(37);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
 
@@ -117,7 +117,7 @@ export default function TeamBuilder() {
       .map(([name, members]) => ({ name, members }))
       .sort((a, b) => b.members.length - a.members.length);
 
-    const tables: TableSeat[][] = Array.from({ length: MAX_TABLES }, () => []);
+    const tables: TableSeat[][] = Array.from({ length: numTables }, () => []);
     const splits: { group: string; tables: number[] }[] = [];
     const overflow: TableSeat[] = [];
 
@@ -132,55 +132,74 @@ export default function TeamBuilder() {
       );
     }
 
+    // 정책: 각 조(청크)는 자기 테이블 통째로 사용 — 다른 조와 섞지 않음.
+    // 빈 테이블이 모자라면 그때만 같은 테이블에 추가 그룹 들어감 (warning).
     for (const g of groups) {
       const chunks = evenChunks(g.members.length);
       const placedTables: number[] = [];
       let memberIdx = 0;
 
       for (const chunkSize of chunks) {
-        // 이 청크가 통째로 들어가는 가장 작은 빈 테이블 (Best Fit)
-        let bestIdx = -1;
-        let bestSpace = Infinity;
-        for (let i = 0; i < tables.length; i++) {
-          const sp = SEATS_PER_TABLE - tables[i].length;
-          if (sp >= chunkSize && sp < bestSpace) {
-            bestIdx = i;
-            bestSpace = sp;
-          }
-        }
-        if (bestIdx === -1) {
-          // 통째로 들어가는 곳 없음 — 가장 빈 자리 많은 테이블
+        // 1순위: 빈 테이블 (한 조 = 한 테이블 원칙)
+        let targetIdx = tables.findIndex((t) => t.length === 0);
+        if (targetIdx === -1) {
+          // 2순위: 청크가 통째로 들어가는 가장 작은 잔여 자리 (Best Fit, 부득이하게 섞음)
+          let bestIdx = -1;
+          let bestSpace = Infinity;
           for (let i = 0; i < tables.length; i++) {
             const sp = SEATS_PER_TABLE - tables[i].length;
-            if (
-              bestIdx === -1 ||
-              sp > SEATS_PER_TABLE - tables[bestIdx].length
-            ) {
+            if (sp >= chunkSize && sp < bestSpace) {
               bestIdx = i;
+              bestSpace = sp;
             }
           }
+          targetIdx = bestIdx;
         }
 
-        const cap = SEATS_PER_TABLE - tables[bestIdx].length;
+        if (targetIdx === -1) {
+          // 자리 없음 — overflow
+          for (let j = 0; j < chunkSize; j++) {
+            const m = g.members[memberIdx++];
+            overflow.push({ group: g.name, name: m.name, phone: m.phone });
+          }
+          continue;
+        }
+
+        const cap = SEATS_PER_TABLE - tables[targetIdx].length;
         const placedSize = Math.min(chunkSize, cap);
         for (let j = 0; j < placedSize; j++) {
           const m = g.members[memberIdx++];
-          tables[bestIdx].push({
+          tables[targetIdx].push({
             group: g.name,
             name: m.name,
             phone: m.phone,
           });
         }
-        placedTables.push(bestIdx + 1);
-        // 청크 일부가 자리 모자라면 overflow
+        placedTables.push(targetIdx + 1);
         if (placedSize < chunkSize) {
-          for (let j = 0; j < chunkSize - placedSize; j++) {
-            const m = g.members[memberIdx++];
-            overflow.push({
-              group: g.name,
-              name: m.name,
-              phone: m.phone,
-            });
+          // 청크 일부 못 들어감 — 남은 만큼 같은 조 끼리 다음 빈 테이블로
+          let leftover = chunkSize - placedSize;
+          while (leftover > 0) {
+            const nextIdx = tables.findIndex((t) => t.length < SEATS_PER_TABLE);
+            if (nextIdx === -1) {
+              for (let j = 0; j < leftover; j++) {
+                const m = g.members[memberIdx++];
+                overflow.push({ group: g.name, name: m.name, phone: m.phone });
+              }
+              break;
+            }
+            const c2 = SEATS_PER_TABLE - tables[nextIdx].length;
+            const ps = Math.min(leftover, c2);
+            for (let j = 0; j < ps; j++) {
+              const m = g.members[memberIdx++];
+              tables[nextIdx].push({
+                group: g.name,
+                name: m.name,
+                phone: m.phone,
+              });
+            }
+            placedTables.push(nextIdx + 1);
+            leftover -= ps;
           }
         }
       }
@@ -190,7 +209,7 @@ export default function TeamBuilder() {
     }
 
     return { tables, splits, overflow, totalGroups: groups.length };
-  }, [people]);
+  }, [people, numTables]);
 
   function downloadExcel() {
     if (!assignment) return;
@@ -260,11 +279,35 @@ export default function TeamBuilder() {
 
       <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200">
         <h2 className="mb-3 text-sm font-semibold text-zinc-700">
-          1️⃣ 엑셀 업로드
+          1️⃣ 테이블 수량 설정
+        </h2>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="inline-flex items-center gap-2 text-sm text-zinc-700">
+            테이블 수
+            <input
+              type="number"
+              min={1}
+              max={500}
+              value={numTables}
+              onChange={(e) =>
+                setNumTables(Math.max(1, parseInt(e.target.value, 10) || 1))
+              }
+              className="w-20 rounded-xl bg-zinc-100 px-3 py-1.5 text-sm outline-none"
+            />
+            <span className="text-xs text-zinc-500">개</span>
+          </label>
+          <span className="text-xs text-zinc-500">
+            (테이블당 최대 {SEATS_PER_TABLE}명)
+          </span>
+        </div>
+      </section>
+
+      <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200">
+        <h2 className="mb-3 text-sm font-semibold text-zinc-700">
+          2️⃣ 엑셀 업로드
         </h2>
         <p className="mb-3 text-xs text-zinc-500">
-          엑셀 파일에 <code>조</code>(또는 그룹/group/team)와 <code>이름</code>{" "}
-          컬럼이 있어야 합니다. 첫 행이 헤더.
+          엑셀 파일에 <code>이름</code>, <code>조번호</code>(또는 조/그룹), <code>핸드폰 뒷자리</code> 컬럼이 있어야 합니다. 첫 행이 헤더.
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-500">
@@ -330,7 +373,7 @@ export default function TeamBuilder() {
           <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-700">
-                2️⃣ 배정 결과 (총 {people.length}명, {assignment.totalGroups}개 조)
+                3️⃣ 배정 결과 (총 {people.length}명, {assignment.totalGroups}개 조)
               </h2>
               <div className="flex items-center gap-2">
                 <button
