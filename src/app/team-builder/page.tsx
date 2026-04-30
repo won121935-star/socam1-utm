@@ -14,25 +14,28 @@ import Link from "next/link";
 import * as XLSX from "xlsx";
 import { toPng } from "html-to-image";
 
-const GROUP_COLORS = [
-  "bg-blue-100 text-blue-800 ring-blue-200",
-  "bg-emerald-100 text-emerald-800 ring-emerald-200",
-  "bg-amber-100 text-amber-800 ring-amber-200",
-  "bg-purple-100 text-purple-800 ring-purple-200",
-  "bg-pink-100 text-pink-800 ring-pink-200",
-  "bg-cyan-100 text-cyan-800 ring-cyan-200",
-  "bg-rose-100 text-rose-800 ring-rose-200",
-  "bg-violet-100 text-violet-800 ring-violet-200",
-  "bg-orange-100 text-orange-800 ring-orange-200",
-  "bg-teal-100 text-teal-800 ring-teal-200",
-  "bg-lime-100 text-lime-800 ring-lime-200",
-  "bg-fuchsia-100 text-fuchsia-800 ring-fuchsia-200",
-];
-
-function colorForGroup(name: string): string {
-  let hash = 0;
-  for (const c of name) hash = (hash * 31 + c.charCodeAt(0)) | 0;
-  return GROUP_COLORS[Math.abs(hash) % GROUP_COLORS.length];
+// 조 이름 → 색상 매핑. 모든 조가 다른 색이 되도록 HSL 색상환 균등 분할.
+function buildGroupColorMap(
+  groupNames: string[],
+): Map<string, { bg: string; text: string; ring: string }> {
+  const sorted = [...new Set(groupNames)].sort((a, b) =>
+    a.localeCompare(b, "ko"),
+  );
+  const map = new Map<string, { bg: string; text: string; ring: string }>();
+  const total = Math.max(sorted.length, 1);
+  // 황금각으로 hue 분배 (인접 그룹 색상이 충분히 떨어지도록)
+  const golden = 137.50776405;
+  sorted.forEach((name, i) => {
+    const hue = (i * golden) % 360;
+    map.set(name, {
+      bg: `hsl(${hue}, 70%, 90%)`,
+      text: `hsl(${hue}, 65%, 28%)`,
+      ring: `hsl(${hue}, 60%, 78%)`,
+    });
+  });
+  // total은 사용 안 하지만 서명 명확용
+  void total;
+  return map;
 }
 
 interface Person {
@@ -58,6 +61,11 @@ export default function TeamBuilder() {
   const [numTables, setNumTables] = useState<number>(37);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
+
+  const groupColors = useMemo(
+    () => buildGroupColorMap(people.map((p) => p.group)),
+    [people],
+  );
 
   function handleFile(file: File) {
     setError(null);
@@ -755,13 +763,21 @@ export default function TeamBuilder() {
                       </span>
                     </div>
                     <div className="flex flex-col gap-2.5">
-                      {[...byGroup.entries()].map(([g, members]) => (
+                      {[...byGroup.entries()].map(([g, members]) => {
+                        const c = groupColors.get(g) ?? {
+                          bg: "#f4f4f5",
+                          text: "#3f3f46",
+                          ring: "#e4e4e7",
+                        };
+                        return (
                         <div key={g}>
                           <div
-                            className={
-                              "mb-1 inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 " +
-                              colorForGroup(g)
-                            }
+                            className="mb-1 inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1"
+                            style={{
+                              backgroundColor: c.bg,
+                              color: c.text,
+                              boxShadow: `0 0 0 1px ${c.ring}`,
+                            }}
                           >
                             {g}조 · {members.length}명
                           </div>
@@ -773,10 +789,11 @@ export default function TeamBuilder() {
                               >
                                 <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
                                   <span
-                                    className={
-                                      "shrink-0 rounded px-1 py-0.5 text-[10px] font-bold " +
-                                      colorForGroup(g)
-                                    }
+                                    className="shrink-0 rounded px-1 py-0.5 text-[10px] font-bold"
+                                    style={{
+                                      backgroundColor: c.bg,
+                                      color: c.text,
+                                    }}
                                   >
                                     {g}조
                                   </span>
@@ -798,7 +815,8 @@ export default function TeamBuilder() {
                             ))}
                           </ul>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 );
