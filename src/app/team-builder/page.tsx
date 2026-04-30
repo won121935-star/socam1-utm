@@ -288,10 +288,12 @@ export default function TeamBuilder() {
     }
     const groupTotalSize = (g: string) => groupsMap.get(g)?.length ?? 0;
 
-    // 8명 초과 그룹은 균등 분할 (각 ≥ 2 보장: numChunks=ceil(s/8) 이므로 base ≥ 2)
+    // 청크 최대 4명 (= 한 테이블 절반)으로 강제 — 한 테이블에 여러 조 섞이게,
+    // 모든 청크 ≥ 2 보장 (size 5+ 라도 numChunks≥2, base = floor(5/2) = 2 이상)
+    const MAX_CHUNK = 4;
     function evenChunks(size: number): number[] {
-      if (size <= SEATS_PER_TABLE) return [size];
-      const numChunks = Math.ceil(size / SEATS_PER_TABLE);
+      if (size <= MAX_CHUNK) return [size];
+      const numChunks = Math.ceil(size / MAX_CHUNK);
       const base = Math.floor(size / numChunks);
       const extra = size % numChunks;
       return Array.from({ length: numChunks }, (_, i) =>
@@ -398,21 +400,28 @@ export default function TeamBuilder() {
       }
     }
 
-    // 3. singletons (1인 조) 배치
+    // 3. singletons (1인 조) 배치 — 자리 가장 많은 테이블에 모아 앉히기
+    //    (각자 solo 이긴 하지만 한 테이블에 모여 "혼합 테이블" 로 정리됨)
     for (const atom of singletons) {
       const m = atom.members[0];
+      // 자리 가장 많은 테이블 (있으면 같은 조 이미 있는 테이블 우선)
       let idx = -1;
+      let bestSpace = 0;
       for (let i = 0; i < tables.length; i++) {
-        if (
-          SEATS_PER_TABLE - tables[i].length >= 1 &&
-          tables[i].some((s) => s.group === atom.group)
-        ) {
+        const sp = SEATS_PER_TABLE - tables[i].length;
+        if (sp >= 1 && tables[i].some((s) => s.group === atom.group)) {
           idx = i;
           break;
         }
       }
       if (idx === -1) {
-        idx = tables.findIndex((t) => t.length < SEATS_PER_TABLE);
+        for (let i = 0; i < tables.length; i++) {
+          const sp = SEATS_PER_TABLE - tables[i].length;
+          if (sp > bestSpace) {
+            bestSpace = sp;
+            idx = i;
+          }
+        }
       }
       if (idx !== -1) {
         placeMember(tables[idx], atom.group, m);
@@ -542,6 +551,71 @@ export default function TeamBuilder() {
       }
 
       if (!changed) break;
+    }
+
+    // 4.5. Hill climbing: 핸드코드가 못 잡는 케이스 — 모든 단일 이동/swap 중에 solo net reduction 있는 거 catch
+    function localSoloAt(tableIdx: number): number {
+      const counts = new Map<string, number>();
+      for (const s of tables[tableIdx])
+        counts.set(s.group, (counts.get(s.group) ?? 0) + 1);
+      let c = 0;
+      for (const [gg, n] of counts) {
+        if (n === 1 && groupTotalSize(gg) > 1) c++;
+      }
+      return c;
+    }
+
+    let hcChanged = true;
+    let hcPass = 0;
+    while (hcChanged && hcPass++ < 200) {
+      hcChanged = false;
+
+      // 단일 이동: i 의 멤버 한 명을 j 로
+      for (let i = 0; i < tables.length && !hcChanged; i++) {
+        for (let k = 0; k < tables[i].length && !hcChanged; k++) {
+          const beforeI = localSoloAt(i);
+          for (let j = 0; j < tables.length; j++) {
+            if (j === i) continue;
+            if (SEATS_PER_TABLE - tables[j].length < 1) continue;
+            const beforeJ = localSoloAt(j);
+            const seat = tables[i].splice(k, 1)[0];
+            tables[j].push(seat);
+            const afterI = localSoloAt(i);
+            const afterJ = localSoloAt(j);
+            if (afterI + afterJ < beforeI + beforeJ) {
+              hcChanged = true;
+              break;
+            }
+            tables[j].pop();
+            tables[i].splice(k, 0, seat);
+          }
+        }
+      }
+      if (hcChanged) continue;
+
+      // 단일 swap: i 의 (i,k) ↔ j 의 (j,l)
+      for (let i = 0; i < tables.length && !hcChanged; i++) {
+        for (let k = 0; k < tables[i].length && !hcChanged; k++) {
+          for (let j = i + 1; j < tables.length && !hcChanged; j++) {
+            for (let l = 0; l < tables[j].length; l++) {
+              const beforeI = localSoloAt(i);
+              const beforeJ = localSoloAt(j);
+              const tmp = tables[i][k];
+              tables[i][k] = tables[j][l];
+              tables[j][l] = tmp;
+              const afterI = localSoloAt(i);
+              const afterJ = localSoloAt(j);
+              if (afterI + afterJ < beforeI + beforeJ) {
+                hcChanged = true;
+                break;
+              }
+              const t = tables[i][k];
+              tables[i][k] = tables[j][l];
+              tables[j][l] = t;
+            }
+          }
+        }
+      }
     }
 
     // 5. splits (한 조가 여러 테이블에 분산됨) 계산
