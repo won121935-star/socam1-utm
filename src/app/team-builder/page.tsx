@@ -334,7 +334,11 @@ export default function TeamBuilder() {
               remaining = 0;
               break;
             }
-            const ps = mostSpace;
+            // 1명만 떨어지지 않게: 남는 인원이 1이 되면 1명 덜 채우고 다음 iter에서 2명 묶기
+            let ps = Math.min(remaining, mostSpace);
+            if (remaining - ps === 1 && ps > 1) {
+              ps -= 1;
+            }
             for (let j = 0; j < ps; j++) {
               const m = g.members[memberIdx++];
               tables[mostIdx].push({
@@ -355,35 +359,66 @@ export default function TeamBuilder() {
       }
     }
 
-    // 후처리: 한 테이블에 자기 조 1명만 있는 경우 다른 테이블의 같은 조에 합치기
-    // (조 1명 떨어짐 방지)
-    for (let i = 0; i < tables.length; i++) {
-      // 이 테이블에서 조별 인원 수 카운트
-      const counts = new Map<string, number>();
-      for (const s of tables[i]) {
-        counts.set(s.group, (counts.get(s.group) ?? 0) + 1);
-      }
-      for (const [groupName, n] of counts) {
-        if (n !== 1) continue;
-        // 1명만 있는 조 발견 → 같은 조 다수 있는 다른 테이블 찾기
-        let targetIdx = -1;
-        let targetCount = 0;
-        for (let j = 0; j < tables.length; j++) {
-          if (j === i) continue;
-          const sp = SEATS_PER_TABLE - tables[j].length;
-          if (sp < 1) continue;
-          const c = tables[j].filter((s) => s.group === groupName).length;
-          if (c > targetCount) {
-            targetCount = c;
-            targetIdx = j;
+    // 후처리: 한 테이블에 자기 조 1명만 떨어진 경우 합치기 (반복 적용)
+    // 1) 같은 조 멤버 있는 테이블로 옮기기
+    // 2) 그래도 못 옮기면 같은 조와 다른 테이블에서 1명 swap
+    let fixed = true;
+    let safetyCount = 0;
+    while (fixed && safetyCount++ < 10) {
+      fixed = false;
+      for (let i = 0; i < tables.length; i++) {
+        const counts = new Map<string, number>();
+        for (const s of tables[i]) {
+          counts.set(s.group, (counts.get(s.group) ?? 0) + 1);
+        }
+        for (const [groupName, n] of counts) {
+          if (n !== 1) continue;
+          // 1) 같은 조 다수 있는 다른 테이블 + 자리 있음
+          let targetIdx = -1;
+          let targetCount = 0;
+          for (let j = 0; j < tables.length; j++) {
+            if (j === i) continue;
+            const sp = SEATS_PER_TABLE - tables[j].length;
+            if (sp < 1) continue;
+            const c = tables[j].filter((s) => s.group === groupName).length;
+            if (c > targetCount) {
+              targetCount = c;
+              targetIdx = j;
+            }
           }
+          if (targetIdx !== -1) {
+            const seatIdx = tables[i].findIndex((s) => s.group === groupName);
+            const seat = tables[i].splice(seatIdx, 1)[0];
+            tables[targetIdx].push(seat);
+            fixed = true;
+            break;
+          }
+          // 2) Swap: 다른 테이블의 같은 조 멤버 1명과 위치 교환해서 합치기
+          for (let j = 0; j < tables.length; j++) {
+            if (j === i) continue;
+            const others = tables[j].filter((s) => s.group === groupName);
+            if (others.length === 0) continue;
+            // tables[j] 에서 다른 조 멤버 1명을 우리 자리로 보내고
+            // tables[i] 의 1명을 그 자리로 보내기
+            const otherGroupMember = tables[j].find(
+              (s) => s.group !== groupName,
+            );
+            if (!otherGroupMember) continue;
+            const ourSeatIdx = tables[i].findIndex(
+              (s) => s.group === groupName,
+            );
+            const otherSeatIdx = tables[j].findIndex(
+              (s) => s === otherGroupMember,
+            );
+            const ourSeat = tables[i][ourSeatIdx];
+            tables[i][ourSeatIdx] = otherGroupMember;
+            tables[j][otherSeatIdx] = ourSeat;
+            fixed = true;
+            break;
+          }
+          if (fixed) break;
         }
-        if (targetIdx !== -1 && targetCount >= 1) {
-          // 옮기기
-          const seatIdx = tables[i].findIndex((s) => s.group === groupName);
-          const seat = tables[i].splice(seatIdx, 1)[0];
-          tables[targetIdx].push(seat);
-        }
+        if (fixed) break;
       }
     }
 
