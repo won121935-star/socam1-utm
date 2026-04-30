@@ -11,6 +11,7 @@ import {
   BarChart3,
   ChevronDown,
   BarChart3 as GaIcon,
+  Users,
   Pencil,
 } from "lucide-react";
 import NextLink from "next/link";
@@ -216,12 +217,20 @@ export default function Home() {
             · UTM + 단축 URL + GA
           </span>
         </div>
-        <NextLink
-          href="/settings"
-          className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-2 text-xs font-medium text-zinc-800 hover:bg-zinc-200"
-        >
-          <GaIcon size={12} /> GA 연동
-        </NextLink>
+        <div className="flex flex-wrap items-center gap-2">
+          <NextLink
+            href="/team-builder"
+            className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-2 text-xs font-medium text-zinc-800 hover:bg-zinc-200"
+          >
+            <Users size={12} /> 테이블 배정
+          </NextLink>
+          <NextLink
+            href="/settings"
+            className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-2 text-xs font-medium text-zinc-800 hover:bg-zinc-200"
+          >
+            <GaIcon size={12} /> GA 연동
+          </NextLink>
+        </div>
       </header>
 
       <CampaignCalendar campaigns={campaigns} />
