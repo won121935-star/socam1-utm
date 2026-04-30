@@ -401,7 +401,7 @@ export default function TeamBuilder() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 p-4 md:p-8">
+    <main className="mx-auto flex min-h-screen max-w-[1600px] flex-col gap-6 p-4 md:p-8">
       <header className="flex items-center justify-between">
         <Link
           href="/"
@@ -614,7 +614,7 @@ export default function TeamBuilder() {
                   {new Date().toLocaleDateString("ko-KR")} · 총 {people.length}명
                 </span>
               </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-7">
               {assignment.tables.map((seats, i) => {
                 if (seats.length === 0) {
                   return (
