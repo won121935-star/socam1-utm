@@ -220,6 +220,18 @@ export default function TeamBuilder() {
     for (const p of people) {
       groupSizes.set(p.group, (groupSizes.get(p.group) ?? 0) + 1);
     }
+
+    // 6.5. 1인 조 = 어느 테이블에 가도 혼자 (본질적 solo)
+    const singletons = [...groupSizes.entries()]
+      .filter(([, n]) => n === 1)
+      .map(([g]) => g);
+    if (singletons.length > 0) {
+      issues.push({
+        severity: "warning",
+        label: "🟡 1인 조 (어느 테이블이든 혼자 앉음)",
+        detail: `${singletons.join(", ")}조 (${singletons.length}개) — 멤버가 1명이라 다른 조와 합치지 않으면 어디서든 혼자입니다.`,
+      });
+    }
     const groupStats = [...groupSizes.entries()]
       .sort((a, b) => b[1] - a[1])
       .map(([g, n]) => `${g}: ${n}명`)
@@ -234,29 +246,27 @@ export default function TeamBuilder() {
     };
   }, [people, numTables]);
 
-  // Best-Fit Decreasing 으로 테이블 배정
+  // 배정 알고리즘:
+  //  1. 모든 atom (chunk) 을 size ≥ 2 로 보장 (1인 조만 예외 — 본질적 solo)
+  //  2. FFD (Best-Fit Decreasing) 으로 atom 배치, 안 들어가면 sz≥4 일 때만 절반 분할
+  //  3. 1인 조는 같은 조 있는 테이블 우선, 없으면 빈 자리
+  //  4. 후처리: 직접 이동 + 안전 swap 으로 solo (조 인원 1명) 제거
   const assignment = useMemo(() => {
     if (people.length === 0) return null;
 
-    // 조별로 묶기
-    const groupsMap = new Map<
-      string,
-      { name: string; phone: string; company: string }[]
-    >();
+    type Member = { name: string; phone: string; company: string };
+    type Atom = { group: string; members: Member[] };
+
+    const groupsMap = new Map<string, Member[]>();
     for (const p of people) {
       if (!groupsMap.has(p.group)) groupsMap.set(p.group, []);
-      groupsMap.get(p.group)!.push({ name: p.name, phone: p.phone, company: p.company });
+      groupsMap
+        .get(p.group)!
+        .push({ name: p.name, phone: p.phone, company: p.company });
     }
-    // 조를 인원 수 내림차순으로 정렬
-    const groups = [...groupsMap.entries()]
-      .map(([name, members]) => ({ name, members }))
-      .sort((a, b) => b.members.length - a.members.length);
+    const groupTotalSize = (g: string) => groupsMap.get(g)?.length ?? 0;
 
-    const tables: TableSeat[][] = Array.from({ length: numTables }, () => []);
-    const splits: { group: string; tables: number[] }[] = [];
-    const overflow: TableSeat[] = [];
-
-    // 그룹 size > 8 이면 ceil(size/8)개로 균등 분배 (예: 17 → 6+6+5)
+    // 8명 초과 그룹은 균등 분할 (각 ≥ 2 보장: numChunks=ceil(s/8) 이므로 base ≥ 2)
     function evenChunks(size: number): number[] {
       if (size <= SEATS_PER_TABLE) return [size];
       const numChunks = Math.ceil(size / SEATS_PER_TABLE);
@@ -267,195 +277,235 @@ export default function TeamBuilder() {
       );
     }
 
-    // 정책: 같은 조 최대한 한 테이블 + 빈 자리 채우기
-    // 1순위: 이미 같은 조 멤버가 있는 테이블 (조 분산 방지)
-    // 2순위: 청크가 통째로 들어가는 가장 작은 잔여 자리 (Best Fit)
-    // 3순위: 빈 테이블
-    // 마지막: 부분 채움
-    // 청크 배치: 거리 제약 없음. Best-fit + 재귀 분할 + 마지막은 1명씩 같은 조 옆에.
-    function findBestFit(size: number): number {
-      // Best Fit: 통째로 들어가는 가장 작은 잔여
+    // 1. atom 분리: ≥2 (bigAtoms) / =1 (singletons, 본질적 1인 조)
+    const bigAtoms: Atom[] = [];
+    const singletons: Atom[] = [];
+    for (const [name, members] of groupsMap) {
+      if (members.length === 1) {
+        singletons.push({ group: name, members: [...members] });
+        continue;
+      }
+      const sizes = evenChunks(members.length);
+      let idx = 0;
+      for (const sz of sizes) {
+        bigAtoms.push({ group: name, members: members.slice(idx, idx + sz) });
+        idx += sz;
+      }
+    }
+
+    const tables: TableSeat[][] = Array.from({ length: numTables }, () => []);
+    const overflow: TableSeat[] = [];
+
+    function placeMember(table: TableSeat[], group: string, m: Member) {
+      table.push({ group, name: m.name, phone: m.phone, company: m.company });
+    }
+
+    // 2. FFD - bigAtoms 배치
+    const queue: Atom[] = [...bigAtoms].sort(
+      (a, b) => b.members.length - a.members.length,
+    );
+    while (queue.length > 0) {
+      const atom = queue.shift()!;
+      const sz = atom.members.length;
+
+      // best-fit: 같은 조 있는 테이블 먼저, 없으면 일반 best-fit
       let bestIdx = -1;
       let bestSpace = Infinity;
       for (let i = 0; i < tables.length; i++) {
         const sp = SEATS_PER_TABLE - tables[i].length;
-        if (sp >= size && sp < bestSpace) {
-          bestIdx = i;
+        if (
+          sp >= sz &&
+          tables[i].some((s) => s.group === atom.group) &&
+          sp < bestSpace
+        ) {
           bestSpace = sp;
+          bestIdx = i;
         }
       }
-      return bestIdx;
-    }
-
-    function placeOne(
-      m: { name: string; phone: string; company: string },
-      groupName: string,
-      placedTables: number[],
-    ): void {
-      // 1순위: 같은 조 멤버 이미 있는 테이블 + 자리
-      let idx = -1;
-      for (let i = 0; i < tables.length; i++) {
-        const sp = SEATS_PER_TABLE - tables[i].length;
-        if (sp >= 1 && tables[i].some((s) => s.group === groupName)) {
-          idx = i;
-          break;
+      if (bestIdx === -1) {
+        for (let i = 0; i < tables.length; i++) {
+          const sp = SEATS_PER_TABLE - tables[i].length;
+          if (sp >= sz && sp < bestSpace) {
+            bestSpace = sp;
+            bestIdx = i;
+          }
         }
       }
-      // 2순위: 아무 빈 자리
-      if (idx === -1) {
-        idx = tables.findIndex((t) => t.length < SEATS_PER_TABLE);
+      if (bestIdx !== -1) {
+        for (const m of atom.members) placeMember(tables[bestIdx], atom.group, m);
+        continue;
       }
-      if (idx !== -1) {
-        tables[idx].push({
-          group: groupName,
-          name: m.name,
-          phone: m.phone,
-          company: m.company,
+
+      // 통째로 못 넣음 → sz≥4 면 절반 분할 (각 ≥2 유지)
+      if (sz >= 4) {
+        const half = Math.ceil(sz / 2);
+        queue.push({
+          group: atom.group,
+          members: atom.members.slice(0, half),
         });
-        if (!placedTables.includes(idx + 1)) placedTables.push(idx + 1);
-      } else {
-        overflow.push({
-          group: groupName,
-          name: m.name,
-          phone: m.phone,
-          company: m.company,
-        });
+        queue.push({ group: atom.group, members: atom.members.slice(half) });
+        queue.sort((a, b) => b.members.length - a.members.length);
+        continue;
       }
-    }
 
-    function tryPlace(
-      members: { name: string; phone: string; company: string }[],
-      groupName: string,
-      placedTables: number[],
-    ): void {
-      const size = members.length;
-      if (size === 0) return;
-
-      // 통째로 best-fit
-      const idx = findBestFit(size);
-      if (idx !== -1) {
-        for (const m of members) {
-          tables[idx].push({
-            group: groupName,
+      // sz=2 or 3 인데 통째도 안 됨 → 개별 배치 (post-process 가 solo 정리)
+      for (const m of atom.members) {
+        let placedIdx = -1;
+        for (let i = 0; i < tables.length; i++) {
+          if (
+            SEATS_PER_TABLE - tables[i].length >= 1 &&
+            tables[i].some((s) => s.group === atom.group)
+          ) {
+            placedIdx = i;
+            break;
+          }
+        }
+        if (placedIdx === -1) {
+          placedIdx = tables.findIndex((t) => t.length < SEATS_PER_TABLE);
+        }
+        if (placedIdx !== -1) {
+          placeMember(tables[placedIdx], atom.group, m);
+        } else {
+          overflow.push({
+            group: atom.group,
             name: m.name,
             phone: m.phone,
             company: m.company,
           });
         }
-        if (!placedTables.includes(idx + 1)) placedTables.push(idx + 1);
-        return;
       }
-      // size ≥ 4 → 절반 분할 (각 ≥ 2)
-      if (size >= 4) {
-        const half = Math.ceil(size / 2);
-        tryPlace(members.slice(0, half), groupName, placedTables);
-        tryPlace(members.slice(half), groupName, placedTables);
-        return;
-      }
-      // size === 3 — 2+1 시도
-      if (size === 3) {
-        const twoIdx = findBestFit(2);
-        if (twoIdx !== -1) {
-          for (let j = 0; j < 2; j++) {
-            const m = members[j];
-            tables[twoIdx].push({
-              group: groupName,
-              name: m.name,
-              phone: m.phone,
-              company: m.company,
-            });
-          }
-          if (!placedTables.includes(twoIdx + 1))
-            placedTables.push(twoIdx + 1);
-          // 1명 leftover — 같은 조 있는 테이블에 끼워넣기 (마지막 수단)
-          placeOne(members[2], groupName, placedTables);
-          return;
+    }
+
+    // 3. singletons (1인 조) 배치
+    for (const atom of singletons) {
+      const m = atom.members[0];
+      let idx = -1;
+      for (let i = 0; i < tables.length; i++) {
+        if (
+          SEATS_PER_TABLE - tables[i].length >= 1 &&
+          tables[i].some((s) => s.group === atom.group)
+        ) {
+          idx = i;
+          break;
         }
       }
-      // size === 2 또는 size === 3 인데 2자리도 안 남음 → 1명씩 끼워넣기
-      for (const m of members) {
-        placeOne(m, groupName, placedTables);
+      if (idx === -1) {
+        idx = tables.findIndex((t) => t.length < SEATS_PER_TABLE);
+      }
+      if (idx !== -1) {
+        placeMember(tables[idx], atom.group, m);
+      } else {
+        overflow.push({
+          group: atom.group,
+          name: m.name,
+          phone: m.phone,
+          company: m.company,
+        });
       }
     }
 
-    for (const g of groups) {
-      const chunks = evenChunks(g.members.length);
-      const placedTables: number[] = [];
-      let memberIdx = 0;
-      for (const chunkSize of chunks) {
-        const slice = g.members.slice(memberIdx, memberIdx + chunkSize);
-        memberIdx += chunkSize;
-        tryPlace(slice, g.name, placedTables);
-      }
-      if (placedTables.length > 1) {
-        splits.push({ group: g.name, tables: placedTables });
-      }
-    }
-
-    // 후처리: 한 테이블에 자기 조 1명만 떨어진 경우 합치기 (반복 적용)
-    // 1) 같은 조 멤버 있는 테이블로 옮기기
-    // 2) 그래도 못 옮기면 같은 조와 다른 테이블에서 1명 swap
-    let fixed = true;
-    let safetyCount = 0;
-    while (fixed && safetyCount++ < 10) {
-      fixed = false;
+    // 4. 후처리: solo (조 인원 1명) 제거. 1인 조는 본질적 solo 라 제외.
+    function findSolos(): Array<{ i: number; group: string }> {
+      const out: Array<{ i: number; group: string }> = [];
       for (let i = 0; i < tables.length; i++) {
         const counts = new Map<string, number>();
-        for (const s of tables[i]) {
+        for (const s of tables[i])
           counts.set(s.group, (counts.get(s.group) ?? 0) + 1);
+        for (const [g, n] of counts) {
+          if (n === 1 && groupTotalSize(g) > 1) {
+            out.push({ i, group: g });
+          }
         }
-        for (const [groupName, n] of counts) {
-          if (n !== 1) continue;
-          // 1) 같은 조 다수 있는 다른 테이블 + 자리 있음
-          let targetIdx = -1;
-          let targetCount = 0;
-          for (let j = 0; j < tables.length; j++) {
-            if (j === i) continue;
-            const sp = SEATS_PER_TABLE - tables[j].length;
-            if (sp < 1) continue;
-            const c = tables[j].filter((s) => s.group === groupName).length;
-            if (c > targetCount) {
-              targetCount = c;
-              targetIdx = j;
-            }
-          }
-          if (targetIdx !== -1) {
-            const seatIdx = tables[i].findIndex((s) => s.group === groupName);
-            const seat = tables[i].splice(seatIdx, 1)[0];
-            tables[targetIdx].push(seat);
-            fixed = true;
-            break;
-          }
-          // 2) Swap: 다른 테이블의 같은 조 멤버 1명과 위치 교환해서 합치기
-          for (let j = 0; j < tables.length; j++) {
-            if (j === i) continue;
-            const others = tables[j].filter((s) => s.group === groupName);
-            if (others.length === 0) continue;
-            // tables[j] 에서 다른 조 멤버 1명을 우리 자리로 보내고
-            // tables[i] 의 1명을 그 자리로 보내기
-            const otherGroupMember = tables[j].find(
-              (s) => s.group !== groupName,
-            );
-            if (!otherGroupMember) continue;
-            const ourSeatIdx = tables[i].findIndex(
-              (s) => s.group === groupName,
-            );
-            const otherSeatIdx = tables[j].findIndex(
-              (s) => s === otherGroupMember,
-            );
-            const ourSeat = tables[i][ourSeatIdx];
-            tables[i][ourSeatIdx] = otherGroupMember;
-            tables[j][otherSeatIdx] = ourSeat;
-            fixed = true;
-            break;
-          }
-          if (fixed) break;
-        }
-        if (fixed) break;
       }
+      return out;
     }
 
-    return { tables, splits, overflow, totalGroups: groups.length };
+    for (let pass = 0; pass < 500; pass++) {
+      const solos = findSolos();
+      if (solos.length === 0) break;
+      let changed = false;
+
+      for (const { i, group: g } of solos) {
+        const seatIdx = tables[i].findIndex((s) => s.group === g);
+        if (seatIdx === -1) continue;
+
+        // 1) 직접 이동: 같은 조 + 자리 있는 테이블로 (P 가 빠지면 i 의 G solo 해소)
+        let moved = false;
+        for (let j = 0; j < tables.length; j++) {
+          if (j === i) continue;
+          if (SEATS_PER_TABLE - tables[j].length < 1) continue;
+          if (!tables[j].some((s) => s.group === g)) continue;
+          const seat = tables[i].splice(seatIdx, 1)[0];
+          tables[j].push(seat);
+          moved = true;
+          changed = true;
+          break;
+        }
+        if (moved) break;
+
+        // 2) Swap: i 의 P (조 g) ↔ j 의 K (조 H, H≠g). 새로운 solo 안 만드는 조건만.
+        const P = tables[i][seatIdx];
+        const countsI = new Map<string, number>();
+        for (const s of tables[i])
+          countsI.set(s.group, (countsI.get(s.group) ?? 0) + 1);
+
+        let swapped = false;
+        for (let j = 0; j < tables.length && !swapped; j++) {
+          if (j === i) continue;
+          if (!tables[j].some((s) => s.group === g)) continue;
+          const countsJ = new Map<string, number>();
+          for (const s of tables[j])
+            countsJ.set(s.group, (countsJ.get(s.group) ?? 0) + 1);
+
+          for (let k = 0; k < tables[j].length; k++) {
+            const K = tables[j][k];
+            if (K.group === g) continue;
+            const H = K.group;
+            const hAtI = countsI.get(H) ?? 0;
+            const hAtJ = countsJ.get(H) ?? 0;
+            // K 가 i 로 이동 시 i 에 H solo 가 안 되려면 hAtI ≥ 1 (H가 1인 조라면 어차피 본질적 solo)
+            if (hAtI < 1 && groupTotalSize(H) > 1) continue;
+            // K 가 j 에서 빠지면 j 의 H = hAtJ - 1. 이 값이 1 이면 새 solo (H가 1인 조 제외)
+            if (hAtJ === 2 && groupTotalSize(H) > 1) continue;
+
+            tables[i][seatIdx] = K;
+            tables[j][k] = P;
+            changed = true;
+            swapped = true;
+            break;
+          }
+        }
+        if (swapped) break;
+      }
+
+      if (!changed) break;
+    }
+
+    // 5. splits (한 조가 여러 테이블에 분산됨) 계산
+    const groupTablesMap = new Map<string, Set<number>>();
+    for (let i = 0; i < tables.length; i++) {
+      for (const s of tables[i]) {
+        if (!groupTablesMap.has(s.group)) groupTablesMap.set(s.group, new Set());
+        groupTablesMap.get(s.group)!.add(i + 1);
+      }
+    }
+    const splits = [...groupTablesMap.entries()]
+      .filter(([, s]) => s.size > 1)
+      .map(([g, s]) => ({ group: g, tables: [...s].sort((a, b) => a - b) }));
+
+    const remainingSolos = findSolos();
+    const singletonGroupNames = [...groupsMap.entries()]
+      .filter(([, m]) => m.length === 1)
+      .map(([g]) => g);
+
+    return {
+      tables,
+      splits,
+      overflow,
+      totalGroups: groupsMap.size,
+      remainingSolos,
+      singletonGroups: singletonGroupNames,
+    };
   }, [people, numTables]);
 
   function downloadExcel() {
@@ -714,6 +764,25 @@ export default function TeamBuilder() {
               <div className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700 ring-1 ring-red-200">
                 ⚠️ 좌석 부족 ({assignment.overflow.length}명):
                 {assignment.overflow.map((p) => `${p.group}/${p.name}`).join(", ")}
+              </div>
+            )}
+
+            {assignment.remainingSolos.length > 0 && (
+              <div className="mb-3 rounded-xl bg-orange-50 px-3 py-2 text-xs text-orange-800 ring-1 ring-orange-200">
+                ⚠️ 후처리에도 남은 1명 케이스 ({assignment.remainingSolos.length}건) — 좌석 배치가 빡빡해서 자동으로 못 합쳤습니다. 테이블 수를 늘리거나 수동 조정이 필요합니다:
+                <ul className="mt-1 list-disc pl-4">
+                  {assignment.remainingSolos.map((s, idx) => (
+                    <li key={idx}>
+                      <b>{s.group}조</b> @ 테이블 {s.i + 1}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {assignment.singletonGroups.length > 0 && (
+              <div className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-[11px] text-amber-800 ring-1 ring-amber-200">
+                ℹ️ 본질적 1인 조 ({assignment.singletonGroups.length}개): {assignment.singletonGroups.join(", ")} — 이 조는 입력 자체가 1명이라 어떤 알고리즘으로도 혼자 앉을 수밖에 없습니다.
               </div>
             )}
 
