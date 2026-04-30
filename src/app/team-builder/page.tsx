@@ -272,79 +272,82 @@ export default function TeamBuilder() {
     // 2순위: 청크가 통째로 들어가는 가장 작은 잔여 자리 (Best Fit)
     // 3순위: 빈 테이블
     // 마지막: 부분 채움
+    // 청크 배치: 통째로 안 들어가면 반으로 분할(각 절반 ≥2)해서 재귀.
+    // 최소 chunk 크기 2 유지 → 1명 단독 절대 발생 X.
+    function tryPlace(
+      members: { name: string; phone: string; company: string }[],
+      groupName: string,
+      placedTables: number[],
+    ): boolean {
+      const chunkSize = members.length;
+      // 후보 테이블: 통째로 들어가는 자리
+      type Cand = {
+        idx: number;
+        space: number;
+        sameGroup: boolean;
+        distance: number;
+      };
+      const cands: Cand[] = [];
+      for (let i = 0; i < tables.length; i++) {
+        const sp = SEATS_PER_TABLE - tables[i].length;
+        if (sp < chunkSize) continue;
+        const sameGroup = tables[i].some((s) => s.group === groupName);
+        let distance = Infinity;
+        if (placedTables.length > 0) {
+          distance = Math.min(
+            ...placedTables.map((t) => Math.abs(t - 1 - i)),
+          );
+        }
+        cands.push({ idx: i, space: sp, sameGroup, distance });
+      }
+      if (cands.length > 0) {
+        cands.sort((a, b) => {
+          if (a.sameGroup !== b.sameGroup) return a.sameGroup ? -1 : 1;
+          if (a.distance !== b.distance) return a.distance - b.distance;
+          return a.space - b.space;
+        });
+        const idx = cands[0].idx;
+        for (const m of members) {
+          tables[idx].push({
+            group: groupName,
+            name: m.name,
+            phone: m.phone,
+            company: m.company,
+          });
+        }
+        if (!placedTables.includes(idx + 1)) placedTables.push(idx + 1);
+        return true;
+      }
+      // 통째로 못 들어감 → 분할
+      if (chunkSize <= 3) {
+        // 더 쪼갤 수 없음 (2+1 분할은 1명 단독 발생). overflow.
+        for (const m of members) {
+          overflow.push({
+            group: groupName,
+            name: m.name,
+            phone: m.phone,
+            company: m.company,
+          });
+        }
+        return false;
+      }
+      // 절반 분할 (각 ≥ 2 보장)
+      const half = Math.ceil(chunkSize / 2);
+      const a = members.slice(0, half);
+      const b = members.slice(half);
+      const okA = tryPlace(a, groupName, placedTables);
+      const okB = tryPlace(b, groupName, placedTables);
+      return okA && okB;
+    }
+
     for (const g of groups) {
       const chunks = evenChunks(g.members.length);
       const placedTables: number[] = [];
       let memberIdx = 0;
-
       for (const chunkSize of chunks) {
-        let remaining = chunkSize;
-
-        while (remaining > 0) {
-          // 점수 기반 후보 선택:
-          // (1) 같은 조 있는 테이블 우선
-          // (2) 같은 조 청크가 이미 놓인 테이블에서 가까운 거리 우선
-          // (3) Best Fit (작은 잔여 공간 우선)
-          type Cand = {
-            idx: number;
-            space: number;
-            sameGroup: boolean;
-            distance: number;
-          };
-          const cands: Cand[] = [];
-          for (let i = 0; i < tables.length; i++) {
-            const sp = SEATS_PER_TABLE - tables[i].length;
-            if (sp < remaining) continue;
-            const sameGroup = tables[i].some((s) => s.group === g.name);
-            let distance = Infinity;
-            if (placedTables.length > 0) {
-              distance = Math.min(
-                ...placedTables.map((t) => Math.abs(t - 1 - i)),
-              );
-            }
-            cands.push({ idx: i, space: sp, sameGroup, distance });
-          }
-
-          let targetIdx = -1;
-          if (cands.length > 0) {
-            cands.sort((a, b) => {
-              if (a.sameGroup !== b.sameGroup) return a.sameGroup ? -1 : 1;
-              if (a.distance !== b.distance) return a.distance - b.distance;
-              return a.space - b.space;
-            });
-            targetIdx = cands[0].idx;
-          }
-
-          if (targetIdx !== -1) {
-            // 청크 통째로 배치
-            for (let j = 0; j < remaining; j++) {
-              const m = g.members[memberIdx++];
-              tables[targetIdx].push({
-                group: g.name,
-                name: m.name,
-                phone: m.phone,
-                company: m.company,
-              });
-            }
-            if (!placedTables.includes(targetIdx + 1))
-              placedTables.push(targetIdx + 1);
-            remaining = 0;
-          } else {
-            // 통째로 들어가는 자리가 없음 → 청크 쪼개지 않고 overflow 처리
-            // (쪼개면 1명만 떨어지는 케이스 발생할 수 있어서 금지)
-            for (let j = 0; j < remaining; j++) {
-              const m = g.members[memberIdx++];
-              overflow.push({
-                group: g.name,
-                name: m.name,
-                phone: m.phone,
-                company: m.company,
-              });
-            }
-            remaining = 0;
-            break;
-          }
-        }
+        const slice = g.members.slice(memberIdx, memberIdx + chunkSize);
+        memberIdx += chunkSize;
+        tryPlace(slice, g.name, placedTables);
       }
       if (placedTables.length > 1) {
         splits.push({ group: g.name, tables: placedTables });
