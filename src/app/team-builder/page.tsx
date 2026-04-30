@@ -350,6 +350,7 @@ export default function TeamBuilder() {
     if (!assignment) return;
     const rows: {
       테이블번호: number | string;
+      조번호: string;
       이름: string;
       상호명: string;
       "핸드폰 뒷자리": string;
@@ -358,6 +359,7 @@ export default function TeamBuilder() {
       for (const s of seats) {
         rows.push({
           테이블번호: i + 1,
+          조번호: s.group,
           이름: s.name,
           상호명: s.company,
           "핸드폰 뒷자리": s.phone,
@@ -368,6 +370,7 @@ export default function TeamBuilder() {
       for (const s of assignment.overflow) {
         rows.push({
           테이블번호: "(좌석부족)",
+          조번호: s.group,
           이름: s.name,
           상호명: s.company,
           "핸드폰 뒷자리": s.phone,
