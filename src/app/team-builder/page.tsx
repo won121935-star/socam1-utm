@@ -272,41 +272,68 @@ export default function TeamBuilder() {
     // 2순위: 청크가 통째로 들어가는 가장 작은 잔여 자리 (Best Fit)
     // 3순위: 빈 테이블
     // 마지막: 부분 채움
-    // 청크 배치: 통째로 안 들어가면 반으로 분할(각 절반 ≥2)해서 재귀.
-    // 최소 chunk 크기 2 유지 → 1명 단독 절대 발생 X.
+    // 청크 배치: 거리 제약 없음. Best-fit + 재귀 분할 + 마지막은 1명씩 같은 조 옆에.
+    function findBestFit(size: number): number {
+      // Best Fit: 통째로 들어가는 가장 작은 잔여
+      let bestIdx = -1;
+      let bestSpace = Infinity;
+      for (let i = 0; i < tables.length; i++) {
+        const sp = SEATS_PER_TABLE - tables[i].length;
+        if (sp >= size && sp < bestSpace) {
+          bestIdx = i;
+          bestSpace = sp;
+        }
+      }
+      return bestIdx;
+    }
+
+    function placeOne(
+      m: { name: string; phone: string; company: string },
+      groupName: string,
+      placedTables: number[],
+    ): void {
+      // 1순위: 같은 조 멤버 이미 있는 테이블 + 자리
+      let idx = -1;
+      for (let i = 0; i < tables.length; i++) {
+        const sp = SEATS_PER_TABLE - tables[i].length;
+        if (sp >= 1 && tables[i].some((s) => s.group === groupName)) {
+          idx = i;
+          break;
+        }
+      }
+      // 2순위: 아무 빈 자리
+      if (idx === -1) {
+        idx = tables.findIndex((t) => t.length < SEATS_PER_TABLE);
+      }
+      if (idx !== -1) {
+        tables[idx].push({
+          group: groupName,
+          name: m.name,
+          phone: m.phone,
+          company: m.company,
+        });
+        if (!placedTables.includes(idx + 1)) placedTables.push(idx + 1);
+      } else {
+        overflow.push({
+          group: groupName,
+          name: m.name,
+          phone: m.phone,
+          company: m.company,
+        });
+      }
+    }
+
     function tryPlace(
       members: { name: string; phone: string; company: string }[],
       groupName: string,
       placedTables: number[],
-    ): boolean {
-      const chunkSize = members.length;
-      // 후보 테이블: 통째로 들어가는 자리
-      type Cand = {
-        idx: number;
-        space: number;
-        sameGroup: boolean;
-        distance: number;
-      };
-      const cands: Cand[] = [];
-      for (let i = 0; i < tables.length; i++) {
-        const sp = SEATS_PER_TABLE - tables[i].length;
-        if (sp < chunkSize) continue;
-        const sameGroup = tables[i].some((s) => s.group === groupName);
-        let distance = Infinity;
-        if (placedTables.length > 0) {
-          distance = Math.min(
-            ...placedTables.map((t) => Math.abs(t - 1 - i)),
-          );
-        }
-        cands.push({ idx: i, space: sp, sameGroup, distance });
-      }
-      if (cands.length > 0) {
-        cands.sort((a, b) => {
-          if (a.sameGroup !== b.sameGroup) return a.sameGroup ? -1 : 1;
-          if (a.distance !== b.distance) return a.distance - b.distance;
-          return a.space - b.space;
-        });
-        const idx = cands[0].idx;
+    ): void {
+      const size = members.length;
+      if (size === 0) return;
+
+      // 통째로 best-fit
+      const idx = findBestFit(size);
+      if (idx !== -1) {
         for (const m of members) {
           tables[idx].push({
             group: groupName,
@@ -316,28 +343,39 @@ export default function TeamBuilder() {
           });
         }
         if (!placedTables.includes(idx + 1)) placedTables.push(idx + 1);
-        return true;
+        return;
       }
-      // 통째로 못 들어감 → 분할
-      if (chunkSize <= 3) {
-        // 더 쪼갤 수 없음 (2+1 분할은 1명 단독 발생). overflow.
-        for (const m of members) {
-          overflow.push({
-            group: groupName,
-            name: m.name,
-            phone: m.phone,
-            company: m.company,
-          });
+      // size ≥ 4 → 절반 분할 (각 ≥ 2)
+      if (size >= 4) {
+        const half = Math.ceil(size / 2);
+        tryPlace(members.slice(0, half), groupName, placedTables);
+        tryPlace(members.slice(half), groupName, placedTables);
+        return;
+      }
+      // size === 3 — 2+1 시도
+      if (size === 3) {
+        const twoIdx = findBestFit(2);
+        if (twoIdx !== -1) {
+          for (let j = 0; j < 2; j++) {
+            const m = members[j];
+            tables[twoIdx].push({
+              group: groupName,
+              name: m.name,
+              phone: m.phone,
+              company: m.company,
+            });
+          }
+          if (!placedTables.includes(twoIdx + 1))
+            placedTables.push(twoIdx + 1);
+          // 1명 leftover — 같은 조 있는 테이블에 끼워넣기 (마지막 수단)
+          placeOne(members[2], groupName, placedTables);
+          return;
         }
-        return false;
       }
-      // 절반 분할 (각 ≥ 2 보장)
-      const half = Math.ceil(chunkSize / 2);
-      const a = members.slice(0, half);
-      const b = members.slice(half);
-      const okA = tryPlace(a, groupName, placedTables);
-      const okB = tryPlace(b, groupName, placedTables);
-      return okA && okB;
+      // size === 2 또는 size === 3 인데 2자리도 안 남음 → 1명씩 끼워넣기
+      for (const m of members) {
+        placeOne(m, groupName, placedTables);
+      }
     }
 
     for (const g of groups) {
