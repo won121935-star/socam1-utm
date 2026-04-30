@@ -43,6 +43,7 @@ interface Person {
   name: string;
   phone: string; // 핸드폰 뒷자리
   company: string; // 상호명 (선택)
+  region: string; // 권역 (선택)
 }
 
 interface TableSeat {
@@ -50,6 +51,7 @@ interface TableSeat {
   name: string;
   phone: string;
   company: string;
+  region: string;
 }
 
 const SEATS_PER_TABLE = 8;
@@ -93,13 +95,18 @@ export default function TeamBuilder() {
           const companyKey = Object.keys(r).find((k) =>
             /상호|업체|회사|company|brand|소속/i.test(k),
           );
+          // Find 권역 / 지역 / region column
+          const regionKey = Object.keys(r).find((k) =>
+            /권역|지역|시도|시·도|구역|region|area|zone/i.test(k),
+          );
           if (!groupKey || !nameKey) continue;
           const group = String(r[groupKey] ?? "").trim();
           const name = String(r[nameKey] ?? "").trim();
           const phone = phoneKey ? String(r[phoneKey] ?? "").trim() : "";
           const company = companyKey ? String(r[companyKey] ?? "").trim() : "";
+          const region = regionKey ? String(r[regionKey] ?? "").trim() : "";
           if (!group || !name) continue;
-          parsed.push({ group, name, phone, company });
+          parsed.push({ group, name, phone, company, region });
         }
         if (parsed.length === 0) {
           setError(
@@ -255,7 +262,7 @@ export default function TeamBuilder() {
   const assignment = useMemo(() => {
     if (people.length === 0) return null;
 
-    type Member = { name: string; phone: string; company: string };
+    type Member = { name: string; phone: string; company: string; region: string };
     type Atom = { group: string; members: Member[] };
 
     // seed 기반 PRNG (shuffleSeed 가 같으면 같은 결과, 다르면 다른 배치)
@@ -280,7 +287,7 @@ export default function TeamBuilder() {
       if (!groupsMap.has(p.group)) groupsMap.set(p.group, []);
       groupsMap
         .get(p.group)!
-        .push({ name: p.name, phone: p.phone, company: p.company });
+        .push({ name: p.name, phone: p.phone, company: p.company, region: p.region });
     }
     // 그룹 내 멤버 순서 셔플 (같은 조 안에서 누가 어느 청크로 갈지 다양화)
     for (const [name, members] of groupsMap) {
@@ -321,7 +328,7 @@ export default function TeamBuilder() {
     const overflow: TableSeat[] = [];
 
     function placeMember(table: TableSeat[], group: string, m: Member) {
-      table.push({ group, name: m.name, phone: m.phone, company: m.company });
+      table.push({ group, name: m.name, phone: m.phone, company: m.company, region: m.region });
     }
 
     // 2. FFD - bigAtoms 배치 (셔플 후 size desc 정렬 — 동일 size 내에서 순서 랜덤화)
@@ -332,9 +339,17 @@ export default function TeamBuilder() {
       const atom = queue.shift()!;
       const sz = atom.members.length;
 
-      // best-fit: 같은 조 있는 테이블 먼저, 없으면 일반 best-fit
+      // best-fit 우선순위:
+      //  1) 같은 조 이미 있는 테이블 (조 분산 방지)
+      //  2) 같은 권역 있는 테이블 (권역 묶기)
+      //  3) 일반 best-fit
+      // atom 의 멤버들 권역 (모두 같다고 가정 안 함 — 가장 흔한 권역으로)
+      const atomRegions = atom.members.map((m) => m.region).filter(Boolean);
+      const atomRegion = atomRegions.length > 0 ? atomRegions[0] : "";
+
       let bestIdx = -1;
       let bestSpace = Infinity;
+      // 1) 같은 조
       for (let i = 0; i < tables.length; i++) {
         const sp = SEATS_PER_TABLE - tables[i].length;
         if (
@@ -346,6 +361,21 @@ export default function TeamBuilder() {
           bestIdx = i;
         }
       }
+      // 2) 같은 권역
+      if (bestIdx === -1 && atomRegion) {
+        for (let i = 0; i < tables.length; i++) {
+          const sp = SEATS_PER_TABLE - tables[i].length;
+          if (
+            sp >= sz &&
+            tables[i].some((s) => s.region === atomRegion) &&
+            sp < bestSpace
+          ) {
+            bestSpace = sp;
+            bestIdx = i;
+          }
+        }
+      }
+      // 3) 일반 best-fit
       if (bestIdx === -1) {
         for (let i = 0; i < tables.length; i++) {
           const sp = SEATS_PER_TABLE - tables[i].length;
@@ -395,6 +425,7 @@ export default function TeamBuilder() {
             name: m.name,
             phone: m.phone,
             company: m.company,
+            region: m.region,
           });
         }
       }
@@ -431,6 +462,7 @@ export default function TeamBuilder() {
           name: m.name,
           phone: m.phone,
           company: m.company,
+          region: m.region,
         });
       }
     }
@@ -651,6 +683,7 @@ export default function TeamBuilder() {
       테이블번호: number | string;
       조번호: string;
       이름: string;
+      권역: string;
       상호명: string;
       "핸드폰 뒷자리": string;
     }[] = [];
@@ -660,6 +693,7 @@ export default function TeamBuilder() {
           테이블번호: i + 1,
           조번호: s.group,
           이름: s.name,
+          권역: s.region,
           상호명: s.company,
           "핸드폰 뒷자리": s.phone,
         });
@@ -671,6 +705,7 @@ export default function TeamBuilder() {
           테이블번호: "(좌석부족)",
           조번호: s.group,
           이름: s.name,
+          권역: s.region,
           상호명: s.company,
           "핸드폰 뒷자리": s.phone,
         });
@@ -741,7 +776,7 @@ export default function TeamBuilder() {
           2️⃣ 엑셀 업로드
         </h2>
         <p className="mb-3 text-xs text-zinc-500">
-          엑셀 파일에 <code>조번호</code>, <code>이름</code>, <code>상호명</code>(선택), <code>핸드폰 뒷자리</code> 컬럼이 있어야 합니다. 첫 행이 헤더, 컬럼 순서는 자유.
+          엑셀 파일에 <code>조번호</code>, <code>이름</code>, <code>권역</code>(선택), <code>상호명</code>(선택), <code>핸드폰 뒷자리</code> 컬럼이 있어야 합니다. 첫 행이 헤더, 컬럼 순서는 자유.
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-500">
@@ -778,6 +813,7 @@ export default function TeamBuilder() {
               <tr>
                 <th className="border border-zinc-300 bg-white px-3 py-1 text-left">조번호</th>
                 <th className="border border-zinc-300 bg-white px-3 py-1 text-left">이름</th>
+                <th className="border border-zinc-300 bg-white px-3 py-1 text-left">권역</th>
                 <th className="border border-zinc-300 bg-white px-3 py-1 text-left">상호명</th>
                 <th className="border border-zinc-300 bg-white px-3 py-1 text-left">핸드폰 뒷자리</th>
               </tr>
@@ -786,18 +822,21 @@ export default function TeamBuilder() {
               <tr>
                 <td className="border border-zinc-300 px-3 py-1">A</td>
                 <td className="border border-zinc-300 px-3 py-1">홍길동</td>
+                <td className="border border-zinc-300 px-3 py-1">수도권</td>
                 <td className="border border-zinc-300 px-3 py-1">까페 모카</td>
                 <td className="border border-zinc-300 px-3 py-1">1234</td>
               </tr>
               <tr>
                 <td className="border border-zinc-300 px-3 py-1">A</td>
                 <td className="border border-zinc-300 px-3 py-1">김철수</td>
+                <td className="border border-zinc-300 px-3 py-1">수도권</td>
                 <td className="border border-zinc-300 px-3 py-1">까페 모카</td>
                 <td className="border border-zinc-300 px-3 py-1">5678</td>
               </tr>
               <tr>
                 <td className="border border-zinc-300 px-3 py-1">B</td>
                 <td className="border border-zinc-300 px-3 py-1">박영희</td>
+                <td className="border border-zinc-300 px-3 py-1">영남</td>
                 <td className="border border-zinc-300 px-3 py-1">맛집 김밥</td>
                 <td className="border border-zinc-300 px-3 py-1">9012</td>
               </tr>
@@ -952,7 +991,7 @@ export default function TeamBuilder() {
                 // 같은 테이블 안에서 조별로 묶어서 보여주기 (members로 phone까지)
                 const byGroup = new Map<
                   string,
-                  { name: string; phone: string; company: string }[]
+                  { name: string; phone: string; company: string; region: string }[]
                 >();
                 for (const s of seats) {
                   if (!byGroup.has(s.group)) byGroup.set(s.group, []);
@@ -960,6 +999,7 @@ export default function TeamBuilder() {
                     name: s.name,
                     phone: s.phone,
                     company: s.company,
+                    region: s.region,
                   });
                 }
                 const isFull = seats.length === SEATS_PER_TABLE;
@@ -1020,6 +1060,11 @@ export default function TeamBuilder() {
                                   <span className="font-medium text-zinc-800">
                                     {m.name}
                                   </span>
+                                  {m.region && (
+                                    <span className="rounded bg-blue-50 px-1 py-0.5 text-[10px] text-blue-700 ring-1 ring-blue-200">
+                                      {m.region}
+                                    </span>
+                                  )}
                                   {m.company && (
                                     <span className="text-[11px] text-zinc-500">
                                       · {m.company}
