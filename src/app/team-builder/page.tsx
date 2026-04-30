@@ -102,6 +102,123 @@ export default function TeamBuilder() {
     reader.readAsArrayBuffer(file);
   }
 
+  // 입력 데이터 검증
+  const validation = useMemo(() => {
+    if (people.length === 0) return null;
+
+    type Issue = {
+      severity: "error" | "warning";
+      label: string;
+      detail: string;
+    };
+    const issues: Issue[] = [];
+
+    // 1. 이름+폰 둘 다 일치 = 확실한 중복 (error)
+    const exactKey = new Map<string, Person[]>();
+    for (const p of people) {
+      const k = `${p.name}|${p.phone}`;
+      if (!exactKey.has(k)) exactKey.set(k, []);
+      exactKey.get(k)!.push(p);
+    }
+    for (const [, dups] of exactKey) {
+      if (dups.length > 1) {
+        const sample = dups[0];
+        issues.push({
+          severity: "error",
+          label: "🔴 완전 중복 (이름+폰 일치)",
+          detail: `${sample.name} (${sample.phone}) — ${dups.length}회 등장`,
+        });
+      }
+    }
+
+    // 2. 이름만 일치 = 동명이인 가능 (warning)
+    const byName = new Map<string, Person[]>();
+    for (const p of people) {
+      if (!byName.has(p.name)) byName.set(p.name, []);
+      byName.get(p.name)!.push(p);
+    }
+    for (const [name, dups] of byName) {
+      if (dups.length > 1) {
+        // 폰까지 다 같으면 위에서 잡힌 거니까 스킵
+        const phones = new Set(dups.map((d) => d.phone));
+        if (phones.size > 1) {
+          issues.push({
+            severity: "warning",
+            label: "🟡 이름 중복 (동명이인 가능)",
+            detail: `${name} — 폰: ${[...phones].join(", ")} (${dups.length}명)`,
+          });
+        }
+      }
+    }
+
+    // 3. 폰 뒷자리만 일치
+    const byPhone = new Map<string, Person[]>();
+    for (const p of people) {
+      if (!p.phone) continue;
+      if (!byPhone.has(p.phone)) byPhone.set(p.phone, []);
+      byPhone.get(p.phone)!.push(p);
+    }
+    for (const [phone, dups] of byPhone) {
+      if (dups.length > 1) {
+        const names = new Set(dups.map((d) => d.name));
+        if (names.size > 1) {
+          issues.push({
+            severity: "warning",
+            label: "🟡 폰 뒷자리 중복",
+            detail: `${phone} — ${[...names].join(", ")}`,
+          });
+        }
+      }
+    }
+
+    // 4. 폰 형식이 4자리 숫자 아닌 경우 (있을 때만)
+    const badPhones = people.filter(
+      (p) => p.phone && !/^\d{4}$/.test(p.phone),
+    );
+    if (badPhones.length > 0) {
+      issues.push({
+        severity: "warning",
+        label: "🟡 폰 형식 의심 (4자리 숫자 아님)",
+        detail: badPhones
+          .slice(0, 5)
+          .map((p) => `${p.name}: ${p.phone}`)
+          .join(", ") + (badPhones.length > 5 ? ` 외 ${badPhones.length - 5}건` : ""),
+      });
+    }
+
+    // 5. 좌석 수 부족
+    const capacity = numTables * SEATS_PER_TABLE;
+    if (people.length > capacity) {
+      issues.push({
+        severity: "error",
+        label: "🔴 좌석 부족",
+        detail: `현재 ${people.length}명 / 가용 ${capacity}석 → ${
+          people.length - capacity
+        }명 자리 없음. 테이블 수를 ${Math.ceil(
+          people.length / SEATS_PER_TABLE,
+        )}개 이상으로 늘리세요.`,
+      });
+    }
+
+    // 6. 조별 인원 통계
+    const groupSizes = new Map<string, number>();
+    for (const p of people) {
+      groupSizes.set(p.group, (groupSizes.get(p.group) ?? 0) + 1);
+    }
+    const groupStats = [...groupSizes.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([g, n]) => `${g}: ${n}명`)
+      .join(" · ");
+
+    return {
+      issues,
+      groupStats,
+      totalPeople: people.length,
+      totalGroups: groupSizes.size,
+      capacity,
+    };
+  }, [people, numTables]);
+
   // Best-Fit Decreasing 으로 테이블 배정
   const assignment = useMemo(() => {
     if (people.length === 0) return null;
@@ -373,12 +490,56 @@ export default function TeamBuilder() {
         </details>
       </section>
 
+      {validation && (
+        <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200">
+          <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-semibold text-zinc-700">
+              3️⃣ 데이터 검증
+            </h2>
+            <span className="text-xs text-zinc-500">
+              총 {validation.totalPeople}명 · {validation.totalGroups}개 조 · 가용 좌석 {validation.capacity}
+            </span>
+          </div>
+
+          {/* 통과 메시지 */}
+          {validation.issues.length === 0 ? (
+            <div className="rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-700 ring-1 ring-emerald-200">
+              ✅ 검증 통과 — 중복·오류 없음
+            </div>
+          ) : (
+            <ul className="flex flex-col gap-1.5">
+              {validation.issues.map((iss, idx) => (
+                <li
+                  key={idx}
+                  className={
+                    iss.severity === "error"
+                      ? "rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700 ring-1 ring-red-200"
+                      : "rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-200"
+                  }
+                >
+                  <div className="font-semibold">{iss.label}</div>
+                  <div className="mt-0.5">{iss.detail}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {/* 조별 통계 */}
+          <details className="mt-3 rounded-xl bg-zinc-50 p-2 text-[11px] text-zinc-600 ring-1 ring-zinc-200">
+            <summary className="cursor-pointer font-medium text-zinc-700">
+              📊 조별 인원 분포
+            </summary>
+            <div className="mt-2 leading-relaxed">{validation.groupStats}</div>
+          </details>
+        </section>
+      )}
+
       {assignment && (
         <>
           <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-700">
-                3️⃣ 배정 결과 (총 {people.length}명, {assignment.totalGroups}개 조)
+                4️⃣ 배정 결과 (총 {people.length}명, {assignment.totalGroups}개 조)
               </h2>
               <div className="flex items-center gap-2">
                 <button
