@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Upload,
   Download,
@@ -54,8 +54,20 @@ export default function TeamBuilder() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [numTables, setNumTables] = useState<number>(37);
+  const [companyName, setCompanyName] = useState<string>(
+    typeof window !== "undefined"
+      ? window.localStorage.getItem("teambuilder:companyName") ?? ""
+      : "",
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
+
+  // 상호명 변경 시 localStorage 저장
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("teambuilder:companyName", companyName);
+    }
+  }, [companyName]);
 
   function handleFile(file: File) {
     setError(null);
@@ -335,11 +347,13 @@ export default function TeamBuilder() {
 
   function downloadExcel() {
     if (!assignment) return;
+    const company = companyName.trim();
     const rows: {
       테이블NO: number | string;
       이름: string;
       조번호: string;
       "핸드폰 뒷자리": string;
+      상호명: string;
     }[] = [];
     assignment.tables.forEach((seats, i) => {
       for (const s of seats) {
@@ -348,6 +362,7 @@ export default function TeamBuilder() {
           이름: s.name,
           조번호: s.group,
           "핸드폰 뒷자리": s.phone,
+          상호명: company,
         });
       }
     });
@@ -358,6 +373,7 @@ export default function TeamBuilder() {
           이름: s.name,
           조번호: s.group,
           "핸드폰 뒷자리": s.phone,
+          상호명: company,
         });
       }
     }
@@ -401,9 +417,9 @@ export default function TeamBuilder() {
 
       <section className="rounded-2xl bg-white p-5 ring-1 ring-zinc-200">
         <h2 className="mb-3 text-sm font-semibold text-zinc-700">
-          1️⃣ 테이블 수량 설정
+          1️⃣ 기본 설정
         </h2>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
           <label className="inline-flex items-center gap-2 text-sm text-zinc-700">
             테이블 수
             <input
@@ -416,10 +432,20 @@ export default function TeamBuilder() {
               }
               className="w-20 rounded-xl bg-zinc-100 px-3 py-1.5 text-sm outline-none"
             />
-            <span className="text-xs text-zinc-500">개</span>
+            <span className="text-xs text-zinc-500">개 (각 {SEATS_PER_TABLE}명)</span>
           </label>
-          <span className="text-xs text-zinc-500">
-            (테이블당 최대 {SEATS_PER_TABLE}명)
+          <label className="inline-flex items-center gap-2 text-sm text-zinc-700">
+            상호명 (선택)
+            <input
+              type="text"
+              value={companyName}
+              onChange={(e) => setCompanyName(e.target.value)}
+              placeholder="예: 소캠1팀"
+              className="w-48 rounded-xl bg-zinc-100 px-3 py-1.5 text-sm outline-none placeholder:text-zinc-400"
+            />
+          </label>
+          <span className="text-xs text-zinc-400">
+            * 엑셀·이미지 출력 끝에 표시됨
           </span>
         </div>
       </section>
@@ -588,10 +614,18 @@ export default function TeamBuilder() {
               </div>
             )}
 
-            <div
-              ref={resultRef}
-              className="grid grid-cols-1 gap-3 bg-white p-2 sm:grid-cols-2 lg:grid-cols-3"
-            >
+            <div ref={resultRef} className="bg-white p-3">
+              {companyName.trim() && (
+                <div className="mb-3 flex items-baseline justify-between border-b border-zinc-200 pb-2">
+                  <h3 className="text-sm font-bold text-zinc-800">
+                    {companyName} 테이블 배정표
+                  </h3>
+                  <span className="text-[11px] text-zinc-500">
+                    {new Date().toLocaleDateString("ko-KR")} · 총 {people.length}명
+                  </span>
+                </div>
+              )}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {assignment.tables.map((seats, i) => {
                 if (seats.length === 0) {
                   return (
@@ -681,6 +715,12 @@ export default function TeamBuilder() {
                   </div>
                 );
               })}
+              </div>
+              {companyName.trim() && (
+                <div className="mt-4 border-t border-zinc-200 pt-2 text-center text-[11px] text-zinc-500">
+                  © {companyName}
+                </div>
+              )}
             </div>
           </section>
         </>
