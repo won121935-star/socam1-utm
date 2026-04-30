@@ -273,27 +273,38 @@ export default function TeamBuilder() {
         let remaining = chunkSize;
 
         while (remaining > 0) {
-          // 1순위: 같은 조 멤버 이미 있는 테이블 + 자리 충분
-          let targetIdx = -1;
-          let targetSpace = Infinity;
+          // 점수 기반 후보 선택:
+          // (1) 같은 조 있는 테이블 우선
+          // (2) 같은 조 청크가 이미 놓인 테이블에서 가까운 거리 우선
+          // (3) Best Fit (작은 잔여 공간 우선)
+          type Cand = {
+            idx: number;
+            space: number;
+            sameGroup: boolean;
+            distance: number;
+          };
+          const cands: Cand[] = [];
           for (let i = 0; i < tables.length; i++) {
             const sp = SEATS_PER_TABLE - tables[i].length;
-            const hasGroup = tables[i].some((s) => s.group === g.name);
-            if (hasGroup && sp >= remaining && sp < targetSpace) {
-              targetIdx = i;
-              targetSpace = sp;
+            if (sp < remaining) continue;
+            const sameGroup = tables[i].some((s) => s.group === g.name);
+            let distance = Infinity;
+            if (placedTables.length > 0) {
+              distance = Math.min(
+                ...placedTables.map((t) => Math.abs(t - 1 - i)),
+              );
             }
+            cands.push({ idx: i, space: sp, sameGroup, distance });
           }
 
-          // 2순위: best-fit (통째로 들어가는 작은 잔여)
-          if (targetIdx === -1) {
-            for (let i = 0; i < tables.length; i++) {
-              const sp = SEATS_PER_TABLE - tables[i].length;
-              if (sp > 0 && sp >= remaining && sp < targetSpace) {
-                targetIdx = i;
-                targetSpace = sp;
-              }
-            }
+          let targetIdx = -1;
+          if (cands.length > 0) {
+            cands.sort((a, b) => {
+              if (a.sameGroup !== b.sameGroup) return a.sameGroup ? -1 : 1;
+              if (a.distance !== b.distance) return a.distance - b.distance;
+              return a.space - b.space;
+            });
+            targetIdx = cands[0].idx;
           }
 
           if (targetIdx !== -1) {
