@@ -259,10 +259,11 @@ export default function TeamBuilder() {
       );
     }
 
-    // 정책: Best-Fit Decreasing — 청크가 통째로 들어가는 "가장 작은 빈 자리"
-    // 우선 선택 → 자연스럽게 4+4 처럼 같은 테이블에 모여서 8명 채움.
-    // 통째로 들어갈 곳 없으면 가장 빈 자리 많은 테이블에 부분 채움.
-    // 모든 좌석 다 찰 때만 overflow.
+    // 정책: 같은 조 최대한 한 테이블 + 빈 자리 채우기
+    // 1순위: 이미 같은 조 멤버가 있는 테이블 (조 분산 방지)
+    // 2순위: 청크가 통째로 들어가는 가장 작은 잔여 자리 (Best Fit)
+    // 3순위: 빈 테이블
+    // 마지막: 부분 채움
     for (const g of groups) {
       const chunks = evenChunks(g.members.length);
       const placedTables: number[] = [];
@@ -272,33 +273,44 @@ export default function TeamBuilder() {
         let remaining = chunkSize;
 
         while (remaining > 0) {
-          // Best Fit: 통째로 들어가는 가장 작은 잔여 자리
-          let bestIdx = -1;
-          let bestSpace = Infinity;
+          // 1순위: 같은 조 멤버 이미 있는 테이블 + 자리 충분
+          let targetIdx = -1;
+          let targetSpace = Infinity;
           for (let i = 0; i < tables.length; i++) {
             const sp = SEATS_PER_TABLE - tables[i].length;
-            if (sp > 0 && sp >= remaining && sp < bestSpace) {
-              bestIdx = i;
-              bestSpace = sp;
+            const hasGroup = tables[i].some((s) => s.group === g.name);
+            if (hasGroup && sp >= remaining && sp < targetSpace) {
+              targetIdx = i;
+              targetSpace = sp;
             }
           }
 
-          if (bestIdx !== -1) {
-            // 통째로 들어감
+          // 2순위: best-fit (통째로 들어가는 작은 잔여)
+          if (targetIdx === -1) {
+            for (let i = 0; i < tables.length; i++) {
+              const sp = SEATS_PER_TABLE - tables[i].length;
+              if (sp > 0 && sp >= remaining && sp < targetSpace) {
+                targetIdx = i;
+                targetSpace = sp;
+              }
+            }
+          }
+
+          if (targetIdx !== -1) {
             for (let j = 0; j < remaining; j++) {
               const m = g.members[memberIdx++];
-              tables[bestIdx].push({
+              tables[targetIdx].push({
                 group: g.name,
                 name: m.name,
                 phone: m.phone,
                 company: m.company,
               });
             }
-            if (!placedTables.includes(bestIdx + 1))
-              placedTables.push(bestIdx + 1);
+            if (!placedTables.includes(targetIdx + 1))
+              placedTables.push(targetIdx + 1);
             remaining = 0;
           } else {
-            // 통째로 안 들어가면 가장 빈 자리 많은 테이블에 부분 채우기
+            // 통째로 못 들어감 — 가장 빈 자리 많은 테이블에 부분 채움
             let mostIdx = -1;
             let mostSpace = 0;
             for (let i = 0; i < tables.length; i++) {
@@ -340,6 +352,38 @@ export default function TeamBuilder() {
       }
       if (placedTables.length > 1) {
         splits.push({ group: g.name, tables: placedTables });
+      }
+    }
+
+    // 후처리: 한 테이블에 자기 조 1명만 있는 경우 다른 테이블의 같은 조에 합치기
+    // (조 1명 떨어짐 방지)
+    for (let i = 0; i < tables.length; i++) {
+      // 이 테이블에서 조별 인원 수 카운트
+      const counts = new Map<string, number>();
+      for (const s of tables[i]) {
+        counts.set(s.group, (counts.get(s.group) ?? 0) + 1);
+      }
+      for (const [groupName, n] of counts) {
+        if (n !== 1) continue;
+        // 1명만 있는 조 발견 → 같은 조 다수 있는 다른 테이블 찾기
+        let targetIdx = -1;
+        let targetCount = 0;
+        for (let j = 0; j < tables.length; j++) {
+          if (j === i) continue;
+          const sp = SEATS_PER_TABLE - tables[j].length;
+          if (sp < 1) continue;
+          const c = tables[j].filter((s) => s.group === groupName).length;
+          if (c > targetCount) {
+            targetCount = c;
+            targetIdx = j;
+          }
+        }
+        if (targetIdx !== -1 && targetCount >= 1) {
+          // 옮기기
+          const seatIdx = tables[i].findIndex((s) => s.group === groupName);
+          const seat = tables[i].splice(seatIdx, 1)[0];
+          tables[targetIdx].push(seat);
+        }
       }
     }
 
