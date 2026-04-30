@@ -316,6 +316,7 @@ export default function TeamBuilder() {
           }
 
           if (targetIdx !== -1) {
+            // 청크 통째로 배치
             for (let j = 0; j < remaining; j++) {
               const m = g.members[memberIdx++];
               tables[targetIdx].push({
@@ -329,47 +330,19 @@ export default function TeamBuilder() {
               placedTables.push(targetIdx + 1);
             remaining = 0;
           } else {
-            // 통째로 못 들어감 — 가장 빈 자리 많은 테이블에 부분 채움
-            let mostIdx = -1;
-            let mostSpace = 0;
-            for (let i = 0; i < tables.length; i++) {
-              const sp = SEATS_PER_TABLE - tables[i].length;
-              if (sp > mostSpace) {
-                mostSpace = sp;
-                mostIdx = i;
-              }
-            }
-            if (mostIdx === -1) {
-              // 진짜 자리 없음
-              for (let j = 0; j < remaining; j++) {
-                const m = g.members[memberIdx++];
-                overflow.push({
-                  group: g.name,
-                  name: m.name,
-                  phone: m.phone,
-                  company: m.company,
-                });
-              }
-              remaining = 0;
-              break;
-            }
-            // 1명만 떨어지지 않게: 남는 인원이 1이 되면 1명 덜 채우고 다음 iter에서 2명 묶기
-            let ps = Math.min(remaining, mostSpace);
-            if (remaining - ps === 1 && ps > 1) {
-              ps -= 1;
-            }
-            for (let j = 0; j < ps; j++) {
+            // 통째로 들어가는 자리가 없음 → 청크 쪼개지 않고 overflow 처리
+            // (쪼개면 1명만 떨어지는 케이스 발생할 수 있어서 금지)
+            for (let j = 0; j < remaining; j++) {
               const m = g.members[memberIdx++];
-              tables[mostIdx].push({
+              overflow.push({
                 group: g.name,
                 name: m.name,
                 phone: m.phone,
                 company: m.company,
               });
             }
-            if (!placedTables.includes(mostIdx + 1))
-              placedTables.push(mostIdx + 1);
-            remaining -= ps;
+            remaining = 0;
+            break;
           }
         }
       }
