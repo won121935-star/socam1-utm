@@ -289,9 +289,12 @@ export default function TeamBuilder() {
         .get(p.group)!
         .push({ name: p.name, phone: p.phone, company: p.company, region: p.region });
     }
-    // 그룹 내 멤버 순서 셔플 (같은 조 안에서 누가 어느 청크로 갈지 다양화)
+    // 그룹 내 멤버 순서: 권역으로 안정 정렬 (셔플 후 권역 정렬 — 같은 권역끼리 같은 청크로)
     for (const [name, members] of groupsMap) {
-      groupsMap.set(name, shuffle(members));
+      const sorted = shuffle(members).sort((a, b) =>
+        (a.region ?? "").localeCompare(b.region ?? "", "ko"),
+      );
+      groupsMap.set(name, sorted);
     }
     const groupTotalSize = (g: string) => groupsMap.get(g)?.length ?? 0;
 
@@ -331,10 +334,14 @@ export default function TeamBuilder() {
       table.push({ group, name: m.name, phone: m.phone, company: m.company, region: m.region });
     }
 
-    // 2. FFD - bigAtoms 배치 (셔플 후 size desc 정렬 — 동일 size 내에서 순서 랜덤화)
-    const queue: Atom[] = shuffle(bigAtoms).sort(
-      (a, b) => b.members.length - a.members.length,
-    );
+    // 2. FFD - bigAtoms 배치 — 권역끼리 묶이게: 권역 정렬 우선 → 같은 권역 안에서 size desc
+    //    (같은 권역 atom 들이 연속으로 처리되면서 인접 테이블에 클러스터링됨)
+    const queue: Atom[] = shuffle(bigAtoms).sort((a, b) => {
+      const regionA = a.members[0]?.region ?? "";
+      const regionB = b.members[0]?.region ?? "";
+      if (regionA !== regionB) return regionA.localeCompare(regionB, "ko");
+      return b.members.length - a.members.length;
+    });
     while (queue.length > 0) {
       const atom = queue.shift()!;
       const sz = atom.members.length;
@@ -398,7 +405,12 @@ export default function TeamBuilder() {
           members: atom.members.slice(0, half),
         });
         queue.push({ group: atom.group, members: atom.members.slice(half) });
-        queue.sort((a, b) => b.members.length - a.members.length);
+        queue.sort((a, b) => {
+          const regionA = a.members[0]?.region ?? "";
+          const regionB = b.members[0]?.region ?? "";
+          if (regionA !== regionB) return regionA.localeCompare(regionB, "ko");
+          return b.members.length - a.members.length;
+        });
         continue;
       }
 
