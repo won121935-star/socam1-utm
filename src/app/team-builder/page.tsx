@@ -8,9 +8,32 @@ import {
   ArrowLeft,
   Users,
   AlertTriangle,
+  Image as ImageIcon,
 } from "lucide-react";
 import Link from "next/link";
 import * as XLSX from "xlsx";
+import { toPng } from "html-to-image";
+
+const GROUP_COLORS = [
+  "bg-blue-100 text-blue-800 ring-blue-200",
+  "bg-emerald-100 text-emerald-800 ring-emerald-200",
+  "bg-amber-100 text-amber-800 ring-amber-200",
+  "bg-purple-100 text-purple-800 ring-purple-200",
+  "bg-pink-100 text-pink-800 ring-pink-200",
+  "bg-cyan-100 text-cyan-800 ring-cyan-200",
+  "bg-rose-100 text-rose-800 ring-rose-200",
+  "bg-violet-100 text-violet-800 ring-violet-200",
+  "bg-orange-100 text-orange-800 ring-orange-200",
+  "bg-teal-100 text-teal-800 ring-teal-200",
+  "bg-lime-100 text-lime-800 ring-lime-200",
+  "bg-fuchsia-100 text-fuchsia-800 ring-fuchsia-200",
+];
+
+function colorForGroup(name: string): string {
+  let hash = 0;
+  for (const c of name) hash = (hash * 31 + c.charCodeAt(0)) | 0;
+  return GROUP_COLORS[Math.abs(hash) % GROUP_COLORS.length];
+}
 
 interface Person {
   group: string;
@@ -32,6 +55,7 @@ export default function TeamBuilder() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const resultRef = useRef<HTMLDivElement>(null);
 
   function handleFile(file: File) {
     setError(null);
@@ -97,57 +121,66 @@ export default function TeamBuilder() {
     const splits: { group: string; tables: number[] }[] = [];
     const overflow: TableSeat[] = [];
 
+    // 그룹 size > 8 이면 ceil(size/8)개로 균등 분배 (예: 17 → 6+6+5)
+    function evenChunks(size: number): number[] {
+      if (size <= SEATS_PER_TABLE) return [size];
+      const numChunks = Math.ceil(size / SEATS_PER_TABLE);
+      const base = Math.floor(size / numChunks);
+      const extra = size % numChunks;
+      return Array.from({ length: numChunks }, (_, i) =>
+        i < extra ? base + 1 : base,
+      );
+    }
+
     for (const g of groups) {
-      let remaining = [...g.members];
+      const chunks = evenChunks(g.members.length);
       const placedTables: number[] = [];
+      let memberIdx = 0;
 
-      while (remaining.length > 0) {
-        const space = (i: number) => SEATS_PER_TABLE - tables[i].length;
-
-        // 1. 통째로 들어가는 가장 작은 빈 자리 찾기 (Best Fit)
+      for (const chunkSize of chunks) {
+        // 이 청크가 통째로 들어가는 가장 작은 빈 테이블 (Best Fit)
         let bestIdx = -1;
         let bestSpace = Infinity;
         for (let i = 0; i < tables.length; i++) {
-          const sp = space(i);
-          if (sp >= remaining.length && sp < bestSpace) {
+          const sp = SEATS_PER_TABLE - tables[i].length;
+          if (sp >= chunkSize && sp < bestSpace) {
             bestIdx = i;
             bestSpace = sp;
           }
         }
+        if (bestIdx === -1) {
+          // 통째로 들어가는 곳 없음 — 가장 빈 자리 많은 테이블
+          for (let i = 0; i < tables.length; i++) {
+            const sp = SEATS_PER_TABLE - tables[i].length;
+            if (
+              bestIdx === -1 ||
+              sp > SEATS_PER_TABLE - tables[bestIdx].length
+            ) {
+              bestIdx = i;
+            }
+          }
+        }
 
-        if (bestIdx !== -1) {
-          // 통째로 배정
-          for (const m of remaining) {
-            tables[bestIdx].push({
+        const cap = SEATS_PER_TABLE - tables[bestIdx].length;
+        const placedSize = Math.min(chunkSize, cap);
+        for (let j = 0; j < placedSize; j++) {
+          const m = g.members[memberIdx++];
+          tables[bestIdx].push({
+            group: g.name,
+            name: m.name,
+            phone: m.phone,
+          });
+        }
+        placedTables.push(bestIdx + 1);
+        // 청크 일부가 자리 모자라면 overflow
+        if (placedSize < chunkSize) {
+          for (let j = 0; j < chunkSize - placedSize; j++) {
+            const m = g.members[memberIdx++];
+            overflow.push({
               group: g.name,
               name: m.name,
               phone: m.phone,
             });
-          }
-          placedTables.push(bestIdx + 1);
-          remaining = [];
-        } else {
-          // 못 들어가면 가장 빈 자리 많은 곳에 부분 배정
-          let mostIdx = 0;
-          for (let i = 1; i < tables.length; i++) {
-            if (space(i) > space(mostIdx)) mostIdx = i;
-          }
-          const cap = space(mostIdx);
-          if (cap === 0) {
-            // 자리 없음 — overflow
-            for (const m of remaining)
-              overflow.push({ group: g.name, name: m.name, phone: m.phone });
-            remaining = [];
-          } else {
-            const taken = remaining.splice(0, cap);
-            for (const m of taken) {
-              tables[mostIdx].push({
-                group: g.name,
-                name: m.name,
-                phone: m.phone,
-              });
-            }
-            placedTables.push(mostIdx + 1);
           }
         }
       }
@@ -191,6 +224,23 @@ export default function TeamBuilder() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "테이블배정");
     XLSX.writeFile(wb, "테이블배정.xlsx");
+  }
+
+  async function downloadImage() {
+    if (!resultRef.current) return;
+    try {
+      const dataUrl = await toPng(resultRef.current, {
+        backgroundColor: "#ffffff",
+        pixelRatio: 2,
+        cacheBust: true,
+      });
+      const link = document.createElement("a");
+      link.download = "테이블배정.png";
+      link.href = dataUrl;
+      link.click();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "이미지 생성 실패");
+    }
   }
 
   return (
@@ -292,6 +342,13 @@ export default function TeamBuilder() {
                 </button>
                 <button
                   type="button"
+                  onClick={downloadImage}
+                  className="inline-flex items-center gap-1 rounded-full bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-500"
+                >
+                  <ImageIcon size={12} /> 이미지 다운로드
+                </button>
+                <button
+                  type="button"
                   onClick={downloadExcel}
                   className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"
                 >
@@ -322,49 +379,86 @@ export default function TeamBuilder() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            <div
+              ref={resultRef}
+              className="grid grid-cols-1 gap-3 bg-white p-2 sm:grid-cols-2 lg:grid-cols-3"
+            >
               {assignment.tables.map((seats, i) => {
                 if (seats.length === 0) {
                   return (
                     <div
                       key={i}
-                      className="rounded-xl bg-zinc-50 p-2 text-center text-[10px] text-zinc-400 ring-1 ring-zinc-200"
+                      className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-zinc-200 bg-zinc-50/50 p-4 text-center"
                     >
-                      <div className="font-semibold">테이블 {i + 1}</div>
-                      <div>(빈 자리)</div>
+                      <div className="text-sm font-bold text-zinc-400">
+                        테이블 {i + 1}
+                      </div>
+                      <div className="mt-1 text-[11px] text-zinc-400">
+                        빈 자리
+                      </div>
                     </div>
                   );
                 }
-                // 같은 테이블 안에서 조별로 묶어서 보여주기
-                const byGroup = new Map<string, string[]>();
+                // 같은 테이블 안에서 조별로 묶어서 보여주기 (members로 phone까지)
+                const byGroup = new Map<
+                  string,
+                  { name: string; phone: string }[]
+                >();
                 for (const s of seats) {
                   if (!byGroup.has(s.group)) byGroup.set(s.group, []);
-                  const display = s.phone ? `${s.name} (${s.phone})` : s.name;
-                  byGroup.get(s.group)!.push(display);
+                  byGroup.get(s.group)!.push({ name: s.name, phone: s.phone });
                 }
+                const isFull = seats.length === SEATS_PER_TABLE;
                 return (
                   <div
                     key={i}
-                    className="rounded-xl bg-white p-2 text-[11px] ring-1 ring-zinc-200"
+                    className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm"
                   >
-                    <div className="mb-1 flex items-center justify-between">
-                      <span className="font-semibold text-zinc-800">
-                        테이블 {i + 1}
-                      </span>
-                      <span className="text-[10px] text-zinc-500">
+                    <div className="mb-3 flex items-baseline justify-between border-b border-zinc-100 pb-2">
+                      <h3 className="text-base font-bold text-zinc-900">
+                        🪑 테이블 {i + 1}
+                      </h3>
+                      <span
+                        className={
+                          isFull
+                            ? "rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700"
+                            : "rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600"
+                        }
+                      >
                         {seats.length}/{SEATS_PER_TABLE}
                       </span>
                     </div>
-                    {[...byGroup.entries()].map(([g, names]) => (
-                      <div key={g} className="mb-1">
-                        <div className="text-[10px] font-medium text-blue-700">
-                          {g}조 ({names.length})
+                    <div className="flex flex-col gap-2.5">
+                      {[...byGroup.entries()].map(([g, members]) => (
+                        <div key={g}>
+                          <div
+                            className={
+                              "mb-1 inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 " +
+                              colorForGroup(g)
+                            }
+                          >
+                            {g}조 · {members.length}명
+                          </div>
+                          <ul className="space-y-1">
+                            {members.map((m, idx) => (
+                              <li
+                                key={idx}
+                                className="flex items-baseline justify-between rounded-md bg-zinc-50 px-2 py-1 text-sm"
+                              >
+                                <span className="font-medium text-zinc-800">
+                                  {m.name}
+                                </span>
+                                {m.phone && (
+                                  <span className="font-mono text-[11px] text-zinc-500">
+                                    {m.phone}
+                                  </span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
                         </div>
-                        <div className="text-[11px] text-zinc-700">
-                          {names.join(", ")}
-                        </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
                 );
               })}
