@@ -265,6 +265,34 @@ export default function TeamBuilder() {
     type Member = { name: string; phone: string; company: string; region: string };
     type Atom = { group: string; members: Member[] };
 
+    // 권역을 큰 클러스터로 정규화 — 수도권은 서울/경기/인천/강원 등 다 합치고,
+    // 지방은 충청끼리, 영남끼리, 호남끼리만 묶이게.
+    function regionCluster(region: string): string {
+      const r = (region ?? "").trim();
+      if (!r) return "";
+      // 수도권 (광역) — 서울/경기/인천/강원 키워드
+      if (
+        r.includes("서울") ||
+        r.includes("경기") ||
+        r.includes("인천") ||
+        r.includes("강북") ||
+        r.includes("강남") ||
+        r.includes("서남") ||
+        r.includes("강원")
+      ) {
+        return "수도권";
+      }
+      // 지방: 같은 도/권역끼리만
+      if (r.startsWith("충청") || r.startsWith("대전") || r.startsWith("세종"))
+        return "충청";
+      if (r.startsWith("영남") || r.startsWith("부산") || r.startsWith("대구") || r.startsWith("울산") || r.startsWith("경상"))
+        return "영남";
+      if (r.startsWith("호남") || r.startsWith("광주") || r.startsWith("전라") || r.startsWith("전남") || r.startsWith("전북"))
+        return "호남";
+      if (r.startsWith("제주")) return "제주";
+      return r; // 알 수 없는 권역은 strict (자기 자신 클러스터)
+    }
+
     // seed 기반 PRNG (shuffleSeed 가 같으면 같은 결과, 다르면 다른 배치)
     let seed = shuffleSeed | 0 || 1;
     function rand(): number {
@@ -289,10 +317,10 @@ export default function TeamBuilder() {
         .get(p.group)!
         .push({ name: p.name, phone: p.phone, company: p.company, region: p.region });
     }
-    // 그룹 내 멤버 순서: 권역으로 안정 정렬 (셔플 후 권역 정렬 — 같은 권역끼리 같은 청크로)
+    // 그룹 내 멤버 순서: 권역 클러스터로 안정 정렬 (같은 클러스터끼리 같은 청크로)
     for (const [name, members] of groupsMap) {
       const sorted = shuffle(members).sort((a, b) =>
-        (a.region ?? "").localeCompare(b.region ?? "", "ko"),
+        regionCluster(a.region).localeCompare(regionCluster(b.region), "ko"),
       );
       groupsMap.set(name, sorted);
     }
@@ -334,12 +362,12 @@ export default function TeamBuilder() {
       table.push({ group, name: m.name, phone: m.phone, company: m.company, region: m.region });
     }
 
-    // 2. FFD - bigAtoms 배치 — 권역끼리 묶이게: 권역 정렬 우선 → 같은 권역 안에서 size desc
-    //    (같은 권역 atom 들이 연속으로 처리되면서 인접 테이블에 클러스터링됨)
+    // 2. FFD - bigAtoms 배치 — 권역 클러스터 우선 → 같은 클러스터 안에서 size desc
+    //    (같은 클러스터 atom 들이 연속으로 처리되면서 인접 테이블에 클러스터링됨)
     const queue: Atom[] = shuffle(bigAtoms).sort((a, b) => {
-      const regionA = a.members[0]?.region ?? "";
-      const regionB = b.members[0]?.region ?? "";
-      if (regionA !== regionB) return regionA.localeCompare(regionB, "ko");
+      const clusterA = regionCluster(a.members[0]?.region ?? "");
+      const clusterB = regionCluster(b.members[0]?.region ?? "");
+      if (clusterA !== clusterB) return clusterA.localeCompare(clusterB, "ko");
       return b.members.length - a.members.length;
     });
     while (queue.length > 0) {
@@ -348,11 +376,10 @@ export default function TeamBuilder() {
 
       // best-fit 우선순위:
       //  1) 같은 조 이미 있는 테이블 (조 분산 방지)
-      //  2) 같은 권역 있는 테이블 (권역 묶기)
-      //  3) 일반 best-fit
-      // atom 의 멤버들 권역 (모두 같다고 가정 안 함 — 가장 흔한 권역으로)
-      const atomRegions = atom.members.map((m) => m.region).filter(Boolean);
-      const atomRegion = atomRegions.length > 0 ? atomRegions[0] : "";
+      //  2) 같은 권역 클러스터 테이블 (수도권끼리 / 지방끼리)
+      //  3) 빈 테이블 (새 클러스터 시작 — 다른 클러스터와 섞이는 것보다 빈 테이블)
+      //  4) 일반 best-fit (마지막 수단 — 다른 클러스터와 섞임)
+      const atomCluster = regionCluster(atom.members[0]?.region ?? "");
 
       let bestIdx = -1;
       let bestSpace = Infinity;
@@ -368,13 +395,13 @@ export default function TeamBuilder() {
           bestIdx = i;
         }
       }
-      // 2) 같은 권역
-      if (bestIdx === -1 && atomRegion) {
+      // 2) 같은 권역 클러스터
+      if (bestIdx === -1 && atomCluster) {
         for (let i = 0; i < tables.length; i++) {
           const sp = SEATS_PER_TABLE - tables[i].length;
           if (
             sp >= sz &&
-            tables[i].some((s) => s.region === atomRegion) &&
+            tables[i].some((s) => regionCluster(s.region) === atomCluster) &&
             sp < bestSpace
           ) {
             bestSpace = sp;
@@ -382,8 +409,18 @@ export default function TeamBuilder() {
           }
         }
       }
-      // 3) 일반 best-fit
+      // 3) 빈 테이블 (다른 클러스터 섞이지 않게 새 자리 시작)
       if (bestIdx === -1) {
+        for (let i = 0; i < tables.length; i++) {
+          if (tables[i].length === 0 && SEATS_PER_TABLE >= sz) {
+            bestIdx = i;
+            break;
+          }
+        }
+      }
+      // 4) 마지막 수단 — 일반 best-fit (다른 클러스터와 섞임)
+      if (bestIdx === -1) {
+        bestSpace = Infinity;
         for (let i = 0; i < tables.length; i++) {
           const sp = SEATS_PER_TABLE - tables[i].length;
           if (sp >= sz && sp < bestSpace) {
@@ -406,9 +443,9 @@ export default function TeamBuilder() {
         });
         queue.push({ group: atom.group, members: atom.members.slice(half) });
         queue.sort((a, b) => {
-          const regionA = a.members[0]?.region ?? "";
-          const regionB = b.members[0]?.region ?? "";
-          if (regionA !== regionB) return regionA.localeCompare(regionB, "ko");
+          const clusterA = regionCluster(a.members[0]?.region ?? "");
+          const clusterB = regionCluster(b.members[0]?.region ?? "");
+          if (clusterA !== clusterB) return clusterA.localeCompare(clusterB, "ko");
           return b.members.length - a.members.length;
         });
         continue;
