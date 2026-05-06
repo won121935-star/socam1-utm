@@ -325,9 +325,11 @@ export default function TeamBuilder() {
     }
     const groupTotalSize = (g: string) => groupsMap.get(g)?.length ?? 0;
 
-    // 청크 최대 4명 (= 한 테이블 절반)으로 강제 — 한 테이블에 여러 조 섞이게,
-    // 모든 청크 ≥ 2 보장 (size 5+ 라도 numChunks≥2, base = floor(5/2) = 2 이상)
-    const MAX_CHUNK = 4;
+    // 청크 최대 = 테이블 좌석 수 — 같은 조 최대한 한 테이블에 묶이게
+    //   - size ≤ seatsPerTable: 통째로 [size]
+    //   - size 초과: 균등 분할 (각 청크 ≥ 2 보장)
+    //   - seatsPerTable 보다 1 큰 경우 ([N+1] = [ceil((N+1)/2), floor((N+1)/2)] 안전)
+    const MAX_CHUNK = seatsPerTable;
     function evenChunks(size: number): number[] {
       if (size <= MAX_CHUNK) return [size];
       const numChunks = Math.ceil(size / MAX_CHUNK);
