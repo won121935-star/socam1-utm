@@ -389,54 +389,54 @@ export default function TeamBuilder() {
       });
     }
 
-    // 2. FFD - bigAtoms 배치 — 권역 클러스터 우선 → 같은 클러스터 안에서 size desc
-    //    (같은 클러스터 atom 들이 연속으로 처리되면서 인접 테이블에 클러스터링됨)
+    // 2. FFD - bigAtoms 배치 — 조 번호 순 정렬 (앞 조가 앞 테이블에)
+    //    "기타조" (1인 조 통합) 는 맨 뒤로
+    function groupOrder(g: string): number {
+      if (g === MERGED_GROUP) return Number.MAX_SAFE_INTEGER;
+      const n = parseInt(g, 10);
+      return isNaN(n) ? Number.MAX_SAFE_INTEGER - 1 : n;
+    }
     const queue: Atom[] = shuffle(bigAtoms).sort((a, b) => {
-      const clusterA = regionCluster(a.members[0]?.region ?? "");
-      const clusterB = regionCluster(b.members[0]?.region ?? "");
-      if (clusterA !== clusterB) return clusterA.localeCompare(clusterB, "ko");
+      const oA = groupOrder(a.group);
+      const oB = groupOrder(b.group);
+      if (oA !== oB) return oA - oB;
+      // 같은 그룹의 청크는 size desc
       return b.members.length - a.members.length;
     });
     while (queue.length > 0) {
       const atom = queue.shift()!;
       const sz = atom.members.length;
 
-      // best-fit 우선순위:
+      // first-fit 우선순위 (앞 테이블에 앞 조가 앉게 — 모두 lowest index 우선):
       //  1) 같은 조 이미 있는 테이블 (조 분산 방지)
-      //  2) 같은 권역 클러스터 테이블 (수도권끼리 / 지방끼리)
-      //  3) 빈 테이블 (새 클러스터 시작 — 다른 클러스터와 섞이는 것보다 빈 테이블)
-      //  4) 일반 best-fit (마지막 수단 — 다른 클러스터와 섞임)
+      //  2) 같은 권역 클러스터 테이블
+      //  3) 빈 테이블
+      //  4) 마지막 수단 — 아무 자리
       const atomCluster = regionCluster(atom.members[0]?.region ?? "");
-
       let bestIdx = -1;
-      let bestSpace = Infinity;
-      // 1) 같은 조
+
+      // 1) 같은 조 (lowest index)
       for (let i = 0; i < tables.length; i++) {
         const sp = seatsPerTable - tables[i].length;
-        if (
-          sp >= sz &&
-          tables[i].some((s) => s.group === atom.group) &&
-          sp < bestSpace
-        ) {
-          bestSpace = sp;
+        if (sp >= sz && tables[i].some((s) => s.group === atom.group)) {
           bestIdx = i;
+          break;
         }
       }
-      // 2) 같은 권역 클러스터
+      // 2) 같은 권역 클러스터 (lowest index)
       if (bestIdx === -1 && atomCluster) {
         for (let i = 0; i < tables.length; i++) {
           const sp = seatsPerTable - tables[i].length;
           if (
             sp >= sz &&
-            tables[i].some((s) => regionCluster(s.region) === atomCluster) &&
-            sp < bestSpace
+            tables[i].some((s) => regionCluster(s.region) === atomCluster)
           ) {
-            bestSpace = sp;
             bestIdx = i;
+            break;
           }
         }
       }
-      // 3) 빈 테이블 (다른 클러스터 섞이지 않게 새 자리 시작)
+      // 3) 빈 테이블 (lowest index)
       if (bestIdx === -1) {
         for (let i = 0; i < tables.length; i++) {
           if (tables[i].length === 0 && seatsPerTable >= sz) {
@@ -445,14 +445,13 @@ export default function TeamBuilder() {
           }
         }
       }
-      // 4) 마지막 수단 — 일반 best-fit (다른 클러스터와 섞임)
+      // 4) 마지막 수단 (lowest index 가능 자리)
       if (bestIdx === -1) {
-        bestSpace = Infinity;
         for (let i = 0; i < tables.length; i++) {
           const sp = seatsPerTable - tables[i].length;
-          if (sp >= sz && sp < bestSpace) {
-            bestSpace = sp;
+          if (sp >= sz) {
             bestIdx = i;
+            break;
           }
         }
       }
@@ -470,9 +469,9 @@ export default function TeamBuilder() {
         });
         queue.push({ group: atom.group, members: atom.members.slice(half) });
         queue.sort((a, b) => {
-          const clusterA = regionCluster(a.members[0]?.region ?? "");
-          const clusterB = regionCluster(b.members[0]?.region ?? "");
-          if (clusterA !== clusterB) return clusterA.localeCompare(clusterB, "ko");
+          const oA = groupOrder(a.group);
+          const oB = groupOrder(b.group);
+          if (oA !== oB) return oA - oB;
           return b.members.length - a.members.length;
         });
         continue;
