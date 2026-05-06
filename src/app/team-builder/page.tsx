@@ -54,13 +54,12 @@ interface TableSeat {
   region: string;
 }
 
-const SEATS_PER_TABLE = 7;
-
 export default function TeamBuilder() {
   const [people, setPeople] = useState<Person[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [numTables, setNumTables] = useState<number>(37);
+  const [seatsPerTable, setSeatsPerTable] = useState<number>(7);
   const [shuffleSeed, setShuffleSeed] = useState<number>(1);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
@@ -210,7 +209,7 @@ export default function TeamBuilder() {
     }
 
     // 5. 좌석 수 부족
-    const capacity = numTables * SEATS_PER_TABLE;
+    const capacity = numTables * seatsPerTable;
     if (people.length > capacity) {
       issues.push({
         severity: "error",
@@ -218,7 +217,7 @@ export default function TeamBuilder() {
         detail: `현재 ${people.length}명 / 가용 ${capacity}석 → ${
           people.length - capacity
         }명 자리 없음. 테이블 수를 ${Math.ceil(
-          people.length / SEATS_PER_TABLE,
+          people.length / seatsPerTable,
         )}개 이상으로 늘리세요.`,
       });
     }
@@ -252,7 +251,7 @@ export default function TeamBuilder() {
       totalGroups: groupSizes.size,
       capacity,
     };
-  }, [people, numTables]);
+  }, [people, numTables, seatsPerTable]);
 
   // 배정 알고리즘:
   //  1. 모든 atom (chunk) 을 size ≥ 2 로 보장 (1인 조만 예외 — 본질적 solo)
@@ -385,7 +384,7 @@ export default function TeamBuilder() {
       let bestSpace = Infinity;
       // 1) 같은 조
       for (let i = 0; i < tables.length; i++) {
-        const sp = SEATS_PER_TABLE - tables[i].length;
+        const sp = seatsPerTable - tables[i].length;
         if (
           sp >= sz &&
           tables[i].some((s) => s.group === atom.group) &&
@@ -398,7 +397,7 @@ export default function TeamBuilder() {
       // 2) 같은 권역 클러스터
       if (bestIdx === -1 && atomCluster) {
         for (let i = 0; i < tables.length; i++) {
-          const sp = SEATS_PER_TABLE - tables[i].length;
+          const sp = seatsPerTable - tables[i].length;
           if (
             sp >= sz &&
             tables[i].some((s) => regionCluster(s.region) === atomCluster) &&
@@ -412,7 +411,7 @@ export default function TeamBuilder() {
       // 3) 빈 테이블 (다른 클러스터 섞이지 않게 새 자리 시작)
       if (bestIdx === -1) {
         for (let i = 0; i < tables.length; i++) {
-          if (tables[i].length === 0 && SEATS_PER_TABLE >= sz) {
+          if (tables[i].length === 0 && seatsPerTable >= sz) {
             bestIdx = i;
             break;
           }
@@ -422,7 +421,7 @@ export default function TeamBuilder() {
       if (bestIdx === -1) {
         bestSpace = Infinity;
         for (let i = 0; i < tables.length; i++) {
-          const sp = SEATS_PER_TABLE - tables[i].length;
+          const sp = seatsPerTable - tables[i].length;
           if (sp >= sz && sp < bestSpace) {
             bestSpace = sp;
             bestIdx = i;
@@ -456,7 +455,7 @@ export default function TeamBuilder() {
         let placedIdx = -1;
         for (let i = 0; i < tables.length; i++) {
           if (
-            SEATS_PER_TABLE - tables[i].length >= 1 &&
+            seatsPerTable - tables[i].length >= 1 &&
             tables[i].some((s) => s.group === atom.group)
           ) {
             placedIdx = i;
@@ -464,7 +463,7 @@ export default function TeamBuilder() {
           }
         }
         if (placedIdx === -1) {
-          placedIdx = tables.findIndex((t) => t.length < SEATS_PER_TABLE);
+          placedIdx = tables.findIndex((t) => t.length < seatsPerTable);
         }
         if (placedIdx !== -1) {
           placeMember(tables[placedIdx], atom.group, m);
@@ -488,7 +487,7 @@ export default function TeamBuilder() {
       let idx = -1;
       let bestSpace = 0;
       for (let i = 0; i < tables.length; i++) {
-        const sp = SEATS_PER_TABLE - tables[i].length;
+        const sp = seatsPerTable - tables[i].length;
         if (sp >= 1 && tables[i].some((s) => s.group === atom.group)) {
           idx = i;
           break;
@@ -496,7 +495,7 @@ export default function TeamBuilder() {
       }
       if (idx === -1) {
         for (let i = 0; i < tables.length; i++) {
-          const sp = SEATS_PER_TABLE - tables[i].length;
+          const sp = seatsPerTable - tables[i].length;
           if (sp > bestSpace) {
             bestSpace = sp;
             idx = i;
@@ -545,7 +544,7 @@ export default function TeamBuilder() {
         let moved = false;
         for (let j = 0; j < tables.length; j++) {
           if (j === i) continue;
-          if (SEATS_PER_TABLE - tables[j].length < 1) continue;
+          if (seatsPerTable - tables[j].length < 1) continue;
           if (!tables[j].some((s) => s.group === g)) continue;
           const seat = tables[i].splice(seatIdx, 1)[0];
           tables[j].push(seat);
@@ -609,7 +608,7 @@ export default function TeamBuilder() {
 
             for (let m = 0; m < tables.length; m++) {
               if (m === i || m === j) continue;
-              if (SEATS_PER_TABLE - tables[m].length < 1) continue;
+              if (seatsPerTable - tables[m].length < 1) continue;
               const hAtM = tables[m].filter((s) => s.group === H).length;
               if (hAtM < 1 && groupTotalSize(H) > 1) continue;
 
@@ -657,7 +656,7 @@ export default function TeamBuilder() {
           const beforeI = localSoloAt(i);
           for (let j = 0; j < tables.length; j++) {
             if (j === i) continue;
-            if (SEATS_PER_TABLE - tables[j].length < 1) continue;
+            if (seatsPerTable - tables[j].length < 1) continue;
             const beforeJ = localSoloAt(j);
             const seat = tables[i].splice(k, 1)[0];
             tables[j].push(seat);
@@ -724,7 +723,7 @@ export default function TeamBuilder() {
       remainingSolos,
       singletonGroups: singletonGroupNames,
     };
-  }, [people, numTables, shuffleSeed]);
+  }, [people, numTables, seatsPerTable, shuffleSeed]);
 
   function downloadExcel() {
     if (!assignment) return;
@@ -802,7 +801,7 @@ export default function TeamBuilder() {
         <h2 className="mb-3 text-sm font-semibold text-zinc-700">
           1️⃣ 테이블 수량 설정
         </h2>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-4">
           <label className="inline-flex items-center gap-2 text-sm text-zinc-700">
             테이블 수
             <input
@@ -815,8 +814,30 @@ export default function TeamBuilder() {
               }
               className="w-20 rounded-xl bg-zinc-100 px-3 py-1.5 text-sm outline-none"
             />
-            <span className="text-xs text-zinc-500">개 (각 {SEATS_PER_TABLE}명)</span>
+            <span className="text-xs text-zinc-500">개</span>
           </label>
+          <div className="inline-flex items-center gap-2 text-sm text-zinc-700">
+            테이블당 인원
+            <div className="flex rounded-full bg-zinc-100 p-0.5">
+              {[7, 8].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => setSeatsPerTable(n)}
+                  className={
+                    seatsPerTable === n
+                      ? "rounded-full bg-blue-600 px-3 py-1 text-xs font-medium text-white"
+                      : "rounded-full px-3 py-1 text-xs text-zinc-600 hover:bg-zinc-200"
+                  }
+                >
+                  {n}명
+                </button>
+              ))}
+            </div>
+          </div>
+          <span className="text-xs text-zinc-400">
+            가용 좌석 {numTables * seatsPerTable}석
+          </span>
         </div>
       </section>
 
@@ -1051,7 +1072,7 @@ export default function TeamBuilder() {
                     region: s.region,
                   });
                 }
-                const isFull = seats.length === SEATS_PER_TABLE;
+                const isFull = seats.length === seatsPerTable;
                 return (
                   <div
                     key={i}
@@ -1068,7 +1089,7 @@ export default function TeamBuilder() {
                             : "rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600"
                         }
                       >
-                        {seats.length}/{SEATS_PER_TABLE}
+                        {seats.length}/{seatsPerTable}
                       </span>
                     </div>
                     <div className="flex flex-col gap-2.5">
