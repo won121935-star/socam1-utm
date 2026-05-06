@@ -44,6 +44,7 @@ interface Person {
   phone: string; // 핸드폰 뒷자리
   company: string; // 상호명 (선택)
   region: string; // 권역 (선택)
+  originalGroup?: string; // 1인 조 통합 시 원래 조 번호
 }
 
 interface TableSeat {
@@ -52,6 +53,7 @@ interface TableSeat {
   phone: string;
   company: string;
   region: string;
+  originalGroup?: string;
 }
 
 export default function TeamBuilder() {
@@ -228,15 +230,15 @@ export default function TeamBuilder() {
       groupSizes.set(p.group, (groupSizes.get(p.group) ?? 0) + 1);
     }
 
-    // 6.5. 1인 조 = 어느 테이블에 가도 혼자 (본질적 solo)
+    // 6.5. 1인 조 → 자동으로 "기타조" 로 통합되어 함께 앉음
     const singletons = [...groupSizes.entries()]
       .filter(([, n]) => n === 1)
       .map(([g]) => g);
     if (singletons.length > 0) {
       issues.push({
         severity: "warning",
-        label: "🟡 1인 조 (어느 테이블이든 혼자 앉음)",
-        detail: `${singletons.join(", ")}조 (${singletons.length}개) — 멤버가 1명이라 다른 조와 합치지 않으면 어디서든 혼자입니다.`,
+        label: `ℹ️ 1인 조 ${singletons.length}개 → "기타조" 로 자동 통합`,
+        detail: `${singletons.join(", ")}조 — 한 테이블에 같이 앉습니다 (이름 옆에 원래 조 번호 표시됨)`,
       });
     }
     const groupStats = [...groupSizes.entries()]
@@ -261,8 +263,21 @@ export default function TeamBuilder() {
   const assignment = useMemo(() => {
     if (people.length === 0) return null;
 
-    type Member = { name: string; phone: string; company: string; region: string };
+    type Member = { name: string; phone: string; company: string; region: string; originalGroup?: string };
     type Atom = { group: string; members: Member[] };
+
+    const MERGED_GROUP = "기타조";
+
+    // 1인 조 (size=1) 들은 같은 "기타조" 로 자동 통합 — 한 테이블에 같이 앉게.
+    // 원래 조 번호는 originalGroup 으로 보존.
+    const groupCounts = new Map<string, number>();
+    for (const p of people) groupCounts.set(p.group, (groupCounts.get(p.group) ?? 0) + 1);
+    const isSinglePersonGroup = (g: string) => groupCounts.get(g) === 1;
+    const peopleProcessed: Person[] = people.map((p) =>
+      isSinglePersonGroup(p.group)
+        ? { ...p, group: MERGED_GROUP, originalGroup: p.group }
+        : p,
+    );
 
     // 권역을 큰 클러스터로 정규화 — 수도권은 서울/경기/인천/강원 등 다 합치고,
     // 지방은 충청끼리, 영남끼리, 호남끼리만 묶이게.
@@ -310,11 +325,15 @@ export default function TeamBuilder() {
     }
 
     const groupsMap = new Map<string, Member[]>();
-    for (const p of people) {
+    for (const p of peopleProcessed) {
       if (!groupsMap.has(p.group)) groupsMap.set(p.group, []);
-      groupsMap
-        .get(p.group)!
-        .push({ name: p.name, phone: p.phone, company: p.company, region: p.region });
+      groupsMap.get(p.group)!.push({
+        name: p.name,
+        phone: p.phone,
+        company: p.company,
+        region: p.region,
+        originalGroup: p.originalGroup,
+      });
     }
     // 그룹 내 멤버 순서: 권역 클러스터로 안정 정렬 (같은 클러스터끼리 같은 청크로)
     for (const [name, members] of groupsMap) {
@@ -360,7 +379,14 @@ export default function TeamBuilder() {
     const overflow: TableSeat[] = [];
 
     function placeMember(table: TableSeat[], group: string, m: Member) {
-      table.push({ group, name: m.name, phone: m.phone, company: m.company, region: m.region });
+      table.push({
+        group,
+        name: m.name,
+        phone: m.phone,
+        company: m.company,
+        region: m.region,
+        originalGroup: m.originalGroup,
+      });
     }
 
     // 2. FFD - bigAtoms 배치 — 권역 클러스터 우선 → 같은 클러스터 안에서 size desc
@@ -476,6 +502,7 @@ export default function TeamBuilder() {
             phone: m.phone,
             company: m.company,
             region: m.region,
+            originalGroup: m.originalGroup,
           });
         }
       }
@@ -513,6 +540,7 @@ export default function TeamBuilder() {
           phone: m.phone,
           company: m.company,
           region: m.region,
+          originalGroup: m.originalGroup,
         });
       }
     }
@@ -732,6 +760,7 @@ export default function TeamBuilder() {
     const rows: {
       테이블번호: number | string;
       조번호: string;
+      "원래 조번호": string;
       이름: string;
       권역: string;
       상호명: string;
@@ -742,6 +771,7 @@ export default function TeamBuilder() {
         rows.push({
           테이블번호: i + 1,
           조번호: s.group,
+          "원래 조번호": s.originalGroup ?? s.group,
           이름: s.name,
           권역: s.region,
           상호명: s.company,
@@ -754,6 +784,7 @@ export default function TeamBuilder() {
         rows.push({
           테이블번호: "(좌석부족)",
           조번호: s.group,
+          "원래 조번호": s.originalGroup ?? s.group,
           이름: s.name,
           권역: s.region,
           상호명: s.company,
@@ -1030,7 +1061,7 @@ export default function TeamBuilder() {
 
             {assignment.singletonGroups.length > 0 && (
               <div className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-[11px] text-amber-800 ring-1 ring-amber-200">
-                ℹ️ 본질적 1인 조 ({assignment.singletonGroups.length}개): {assignment.singletonGroups.join(", ")} — 이 조는 입력 자체가 1명이라 어떤 알고리즘으로도 혼자 앉을 수밖에 없습니다.
+                ℹ️ 1인 조 {assignment.singletonGroups.length}개 ({assignment.singletonGroups.join(", ")}) → "기타조" 로 자동 통합되어 한 테이블에 함께 앉습니다.
               </div>
             )}
 
@@ -1063,7 +1094,7 @@ export default function TeamBuilder() {
                 // 같은 테이블 안에서 조별로 묶어서 보여주기 (members로 phone까지)
                 const byGroup = new Map<
                   string,
-                  { name: string; phone: string; company: string; region: string }[]
+                  { name: string; phone: string; company: string; region: string; originalGroup?: string }[]
                 >();
                 for (const s of seats) {
                   if (!byGroup.has(s.group)) byGroup.set(s.group, []);
@@ -1072,6 +1103,7 @@ export default function TeamBuilder() {
                     phone: s.phone,
                     company: s.company,
                     region: s.region,
+                    originalGroup: s.originalGroup,
                   });
                 }
                 const isFull = seats.length === seatsPerTable;
@@ -1132,6 +1164,11 @@ export default function TeamBuilder() {
                                   <span className="font-medium text-zinc-800">
                                     {m.name}
                                   </span>
+                                  {m.originalGroup && m.originalGroup !== g && (
+                                    <span className="rounded bg-amber-50 px-1 py-0.5 text-[10px] text-amber-700 ring-1 ring-amber-200">
+                                      원: {m.originalGroup}조
+                                    </span>
+                                  )}
                                   {m.region && (
                                     <span className="rounded bg-blue-50 px-1 py-0.5 text-[10px] text-blue-700 ring-1 ring-blue-200">
                                       {m.region}
