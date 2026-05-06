@@ -54,7 +54,7 @@ interface TableSeat {
   region: string;
 }
 
-const SEATS_PER_TABLE = 8;
+const SEATS_PER_TABLE = 7;
 
 export default function TeamBuilder() {
   const [people, setPeople] = useState<Person[]>([]);
