@@ -65,6 +65,14 @@ export default function TeamBuilder() {
   const [shuffleSeed, setShuffleSeed] = useState<number>(1);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
+  const [manualAssignment, setManualAssignment] = useState<{
+    tables: TableSeat[][];
+    splits: { group: string; tables: number[] }[];
+    overflow: TableSeat[];
+    totalGroups: number;
+    remainingSolos: { i: number; group: string }[];
+    singletonGroups: string[];
+  } | null>(null);
 
   const groupColors = useMemo(
     () => buildGroupColorMap(people.map((p) => p.group)),
@@ -80,26 +88,26 @@ export default function TeamBuilder() {
         const wb = XLSX.read(data, { type: "array" });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws);
+
+        // 컬럼 키 헬퍼
+        const findKey = (r: Record<string, unknown>, regex: RegExp) =>
+          Object.keys(r).find((k) => regex.test(k));
+
+        // 첫 행에서 테이블번호 컬럼 있는지 감지 → 수동 배정 모드
+        const firstRow = rows[0] ?? {};
+        const tableNoKey = findKey(firstRow, /테이블번호|테이블 번호|table\s*no|table\s*num/i);
+        const originalGroupKey = findKey(firstRow, /원래\s*조번호|원래\s*조|originalGroup|original/i);
+
         const parsed: Person[] = [];
+        const manualTablesMap = new Map<number, TableSeat[]>();
+        const manualOverflow: TableSeat[] = [];
+
         for (const r of rows) {
-          // Find 조번호 / 그룹 / group / team-like column
-          const groupKey = Object.keys(r).find((k) =>
-            /조번호|조|그룹|group|team|반/i.test(k),
-          );
-          // Find 이름 / name column
-          const nameKey = Object.keys(r).find((k) => /이름|성명|name/i.test(k));
-          // Find 핸드폰 뒷자리 column
-          const phoneKey = Object.keys(r).find((k) =>
-            /핸드폰|폰|뒷|연락처|전화|phone|mobile|tel/i.test(k),
-          );
-          // Find 상호명 / 업체 / company column
-          const companyKey = Object.keys(r).find((k) =>
-            /상호|업체|회사|company|brand|소속/i.test(k),
-          );
-          // Find 권역 / 지역 / region column
-          const regionKey = Object.keys(r).find((k) =>
-            /권역|지역|시도|시·도|구역|region|area|zone/i.test(k),
-          );
+          const groupKey = findKey(r, /조번호|조|그룹|group|team|반/i);
+          const nameKey = findKey(r, /이름|성명|name/i);
+          const phoneKey = findKey(r, /핸드폰|폰|뒷|연락처|전화|phone|mobile|tel/i);
+          const companyKey = findKey(r, /상호|업체|회사|company|brand|소속/i);
+          const regionKey = findKey(r, /권역|지역|시도|시·도|구역|region|area|zone/i);
           if (!groupKey || !nameKey) continue;
           const group = String(r[groupKey] ?? "").trim();
           const name = String(r[nameKey] ?? "").trim();
@@ -107,16 +115,58 @@ export default function TeamBuilder() {
           const company = companyKey ? String(r[companyKey] ?? "").trim() : "";
           const region = regionKey ? String(r[regionKey] ?? "").trim() : "";
           if (!group || !name) continue;
-          parsed.push({ group, name, phone, company, region });
+          const originalGroup = originalGroupKey
+            ? String(r[originalGroupKey] ?? "").trim() || undefined
+            : undefined;
+          parsed.push({ group, name, phone, company, region, originalGroup });
+
+          if (tableNoKey) {
+            const seat: TableSeat = { group, name, phone, company, region, originalGroup };
+            const tnumRaw = String(r[tableNoKey] ?? "").trim();
+            const tn = parseInt(tnumRaw, 10);
+            if (!isNaN(tn) && tn > 0) {
+              if (!manualTablesMap.has(tn)) manualTablesMap.set(tn, []);
+              manualTablesMap.get(tn)!.push(seat);
+            } else {
+              // (좌석부족) 같은 비숫자 → overflow
+              manualOverflow.push(seat);
+            }
+          }
         }
+
         if (parsed.length === 0) {
           setError(
-            "이름·조번호·핸드폰 컬럼을 찾을 수 없습니다. 첫 행이 헤더여야 합니다 (예: '이름', '조번호', '핸드폰 뒷자리').",
+            "이름·조번호 컬럼을 찾을 수 없습니다. 첫 행이 헤더여야 합니다.",
           );
           return;
         }
+
         setPeople(parsed);
         setFileName(file.name);
+
+        if (tableNoKey) {
+          // 수동 배정 모드 — 테이블 배열 빌드 + manualAssignment 설정
+          const maxTn = Math.max(0, ...manualTablesMap.keys());
+          const tables: TableSeat[][] = [];
+          for (let i = 1; i <= maxTn; i++) {
+            tables.push(manualTablesMap.get(i) ?? []);
+          }
+          const groupSet = new Set<string>();
+          for (const seats of tables) for (const s of seats) groupSet.add(s.group);
+          for (const s of manualOverflow) groupSet.add(s.group);
+          setManualAssignment({
+            tables,
+            overflow: manualOverflow,
+            splits: [],
+            totalGroups: groupSet.size,
+            remainingSolos: [],
+            singletonGroups: [],
+          });
+          setNumTables(maxTn);
+        } else {
+          // 자동 배정 모드 — 기존 알고리즘
+          setManualAssignment(null);
+        }
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "엑셀 파일을 읽을 수 없습니다.",
@@ -260,8 +310,8 @@ export default function TeamBuilder() {
   //  2. FFD (Best-Fit Decreasing) 으로 atom 배치, 안 들어가면 sz≥4 일 때만 절반 분할
   //  3. 1인 조는 같은 조 있는 테이블 우선, 없으면 빈 자리
   //  4. 후처리: 직접 이동 + 안전 swap 으로 solo (조 인원 1명) 제거
-  const assignment = useMemo(() => {
-    if (people.length === 0) return null;
+  const computedAssignment = useMemo(() => {
+    if (people.length === 0 || manualAssignment) return null;
 
     type Member = { name: string; phone: string; company: string; region: string; originalGroup?: string };
     type Atom = { group: string; members: Member[] };
@@ -752,7 +802,9 @@ export default function TeamBuilder() {
       remainingSolos,
       singletonGroups: singletonGroupNames,
     };
-  }, [people, numTables, seatsPerTable, shuffleSeed]);
+  }, [people, numTables, seatsPerTable, shuffleSeed, manualAssignment]);
+
+  const assignment = manualAssignment ?? computedAssignment;
 
   function downloadExcel() {
     if (!assignment) return;
@@ -879,7 +931,23 @@ export default function TeamBuilder() {
         </h2>
         <p className="mb-3 text-xs text-zinc-500">
           엑셀 파일에 <code>조번호</code>, <code>이름</code>, <code>권역</code>(선택), <code>상호명</code>(선택), <code>핸드폰 뒷자리</code> 컬럼이 있어야 합니다. 첫 행이 헤더, 컬럼 순서는 자유.
+          <br />
+          <span className="text-blue-600">
+            💡 <code>테이블번호</code> 컬럼이 있으면 자동 배정 건너뛰고 <b>그 배치 그대로 시각화</b> (수동 편집한 엑셀 다시 업로드 가능)
+          </span>
         </p>
+        {manualAssignment && (
+          <div className="mb-3 rounded-xl bg-blue-50 px-3 py-2 text-xs text-blue-800 ring-1 ring-blue-200">
+            ✏️ 수동 배정 모드 — 업로드한 테이블번호 그대로 사용 중. 자동 재계산 안 함.{" "}
+            <button
+              type="button"
+              onClick={() => setManualAssignment(null)}
+              className="ml-2 underline hover:text-blue-600"
+            >
+              자동 모드로 전환
+            </button>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-3">
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-500">
             <Upload size={14} /> 엑셀 파일 선택
@@ -999,13 +1067,15 @@ export default function TeamBuilder() {
                 4️⃣ 배정 결과 (총 {people.length}명, {assignment.totalGroups}개 조)
               </h2>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShuffleSeed(Date.now())}
-                  className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-3 py-1.5 text-xs hover:bg-zinc-200"
-                >
-                  <Shuffle size={12} /> 다시 계산
-                </button>
+                {!manualAssignment && (
+                  <button
+                    type="button"
+                    onClick={() => setShuffleSeed(Date.now())}
+                    className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-3 py-1.5 text-xs hover:bg-zinc-200"
+                  >
+                    <Shuffle size={12} /> 다시 계산
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={downloadImage}
