@@ -414,13 +414,23 @@ export default function TeamBuilder() {
       return isNaN(n) ? Number.MAX_SAFE_INTEGER - 1 : n;
     }
 
-    // 정렬: 조번호 → 권역 클러스터 (같은 그룹 안에서는 권역끼리 묶이게)
+    // 정렬 우선순위:
+    //   1) 조번호 (낮은 조 → 앞 테이블)
+    //   2) 권역 클러스터 (수도권/충청/영남/호남/제주)
+    //   3) 원본 권역 (강북권역, 서남권역 등 — 클러스터 안에서 더 세분)
+    //   4) 이름 (같은 권역 안에서 결정적 순서)
+    // 미응답 / 응답 모두 동일 정렬 사용 (각자 별도 sort)
     function sortPpl(arr: Person[]): Person[] {
       return shuffle(arr).sort((a, b) => {
         const oA = groupOrder(a.group);
         const oB = groupOrder(b.group);
         if (oA !== oB) return oA - oB;
-        return regionCluster(a.region).localeCompare(regionCluster(b.region), "ko");
+        const cA = regionCluster(a.region);
+        const cB = regionCluster(b.region);
+        if (cA !== cB) return cA.localeCompare(cB, "ko");
+        // 같은 클러스터 안에서 원본 권역 으로 더 세분
+        if (a.region !== b.region) return a.region.localeCompare(b.region, "ko");
+        return a.name.localeCompare(b.name, "ko");
       });
     }
 
