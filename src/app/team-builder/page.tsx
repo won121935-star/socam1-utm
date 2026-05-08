@@ -44,6 +44,7 @@ interface Person {
   phone: string; // 핸드폰 뒷자리
   company: string; // 상호명 (선택)
   region: string; // 권역 (선택)
+  responseStatus?: string; // 응답상태 (예: "미응답")
   originalGroup?: string; // 1인 조 통합 시 원래 조 번호
 }
 
@@ -53,6 +54,7 @@ interface TableSeat {
   phone: string;
   company: string;
   region: string;
+  responseStatus?: string;
   originalGroup?: string;
 }
 
@@ -72,6 +74,7 @@ export default function TeamBuilder() {
     totalGroups: number;
     remainingSolos: { i: number; group: string }[];
     singletonGroups: string[];
+    unrespondedTableIndices: number[];
   } | null>(null);
 
   const groupColors = useMemo(
@@ -108,20 +111,22 @@ export default function TeamBuilder() {
           const phoneKey = findKey(r, /핸드폰|폰|뒷|연락처|전화|phone|mobile|tel/i);
           const companyKey = findKey(r, /상호|업체|회사|company|brand|소속/i);
           const regionKey = findKey(r, /권역|지역|시도|시·도|구역|region|area|zone/i);
+          const responseKey = findKey(r, /응답|상태|response|status/i);
           if (!groupKey || !nameKey) continue;
           const group = String(r[groupKey] ?? "").trim();
           const name = String(r[nameKey] ?? "").trim();
           const phone = phoneKey ? String(r[phoneKey] ?? "").trim() : "";
           const company = companyKey ? String(r[companyKey] ?? "").trim() : "";
           const region = regionKey ? String(r[regionKey] ?? "").trim() : "";
+          const responseStatus = responseKey ? String(r[responseKey] ?? "").trim() || undefined : undefined;
           if (!group || !name) continue;
           const originalGroup = originalGroupKey
             ? String(r[originalGroupKey] ?? "").trim() || undefined
             : undefined;
-          parsed.push({ group, name, phone, company, region, originalGroup });
+          parsed.push({ group, name, phone, company, region, responseStatus, originalGroup });
 
           if (tableNoKey) {
-            const seat: TableSeat = { group, name, phone, company, region, originalGroup };
+            const seat: TableSeat = { group, name, phone, company, region, responseStatus, originalGroup };
             const tnumRaw = String(r[tableNoKey] ?? "").trim();
             const tn = parseInt(tnumRaw, 10);
             if (!isNaN(tn) && tn > 0) {
@@ -154,6 +159,17 @@ export default function TeamBuilder() {
           const groupSet = new Set<string>();
           for (const seats of tables) for (const s of seats) groupSet.add(s.group);
           for (const s of manualOverflow) groupSet.add(s.group);
+          // 미응답 테이블 자동 감지: 모든 멤버가 미응답이면 미응답 테이블
+          const unrespondedTableIndices: number[] = [];
+          for (let i = 0; i < tables.length; i++) {
+            if (
+              tables[i].length > 0 &&
+              tables[i].every(
+                (s) => /미응답/.test(s.responseStatus ?? "") || /미응답/.test(s.group),
+              )
+            )
+              unrespondedTableIndices.push(i);
+          }
           setManualAssignment({
             tables,
             overflow: manualOverflow,
@@ -161,6 +177,7 @@ export default function TeamBuilder() {
             totalGroups: groupSet.size,
             remainingSolos: [],
             singletonGroups: [],
+            unrespondedTableIndices,
           });
           setNumTables(maxTn);
         } else {
@@ -305,59 +322,18 @@ export default function TeamBuilder() {
     };
   }, [people, numTables, seatsPerTable]);
 
-  // 배정 알고리즘:
-  //  1. 모든 atom (chunk) 을 size ≥ 2 로 보장 (1인 조만 예외 — 본질적 solo)
-  //  2. FFD (Best-Fit Decreasing) 으로 atom 배치, 안 들어가면 sz≥4 일 때만 절반 분할
-  //  3. 1인 조는 같은 조 있는 테이블 우선, 없으면 빈 자리
-  //  4. 후처리: 직접 이동 + 안전 swap 으로 solo (조 인원 1명) 제거
+  // 배정 알고리즘 (sort + 순차 채우기):
+  //  1. 1인 조 → "기타조" 자동 통합
+  //  2. 미응답 분리 (별도 테이블)
+  //  3. 나머지를 조번호 → 권역 순 정렬
+  //  4. 정렬 순서대로 N명씩 테이블 채우기 (꽉꽉)
+  //  5. 미응답들도 정렬 후 별도 테이블에 채우기
   const computedAssignment = useMemo(() => {
     if (people.length === 0 || manualAssignment) return null;
 
-    type Member = { name: string; phone: string; company: string; region: string; originalGroup?: string };
-    type Atom = { group: string; members: Member[] };
-
     const MERGED_GROUP = "기타조";
 
-    // 1인 조 (size=1) 들은 같은 "기타조" 로 자동 통합 — 한 테이블에 같이 앉게.
-    // 원래 조 번호는 originalGroup 으로 보존.
-    const groupCounts = new Map<string, number>();
-    for (const p of people) groupCounts.set(p.group, (groupCounts.get(p.group) ?? 0) + 1);
-    const isSinglePersonGroup = (g: string) => groupCounts.get(g) === 1;
-    const peopleProcessed: Person[] = people.map((p) =>
-      isSinglePersonGroup(p.group)
-        ? { ...p, group: MERGED_GROUP, originalGroup: p.group }
-        : p,
-    );
-
-    // 권역을 큰 클러스터로 정규화 — 수도권은 서울/경기/인천/강원 등 다 합치고,
-    // 지방은 충청끼리, 영남끼리, 호남끼리만 묶이게.
-    function regionCluster(region: string): string {
-      const r = (region ?? "").trim();
-      if (!r) return "";
-      // 수도권 (광역) — 서울/경기/인천/강원 키워드
-      if (
-        r.includes("서울") ||
-        r.includes("경기") ||
-        r.includes("인천") ||
-        r.includes("강북") ||
-        r.includes("강남") ||
-        r.includes("서남") ||
-        r.includes("강원")
-      ) {
-        return "수도권";
-      }
-      // 지방: 같은 도/권역끼리만
-      if (r.startsWith("충청") || r.startsWith("대전") || r.startsWith("세종"))
-        return "충청";
-      if (r.startsWith("영남") || r.startsWith("부산") || r.startsWith("대구") || r.startsWith("울산") || r.startsWith("경상"))
-        return "영남";
-      if (r.startsWith("호남") || r.startsWith("광주") || r.startsWith("전라") || r.startsWith("전남") || r.startsWith("전북"))
-        return "호남";
-      if (r.startsWith("제주")) return "제주";
-      return r; // 알 수 없는 권역은 strict (자기 자신 클러스터)
-    }
-
-    // seed 기반 PRNG (shuffleSeed 가 같으면 같은 결과, 다르면 다른 배치)
+    // seed 기반 PRNG
     let seed = shuffleSeed | 0 || 1;
     function rand(): number {
       let t = (seed += 0x6d2b79f5);
@@ -374,410 +350,114 @@ export default function TeamBuilder() {
       return a;
     }
 
-    const groupsMap = new Map<string, Member[]>();
-    for (const p of peopleProcessed) {
-      if (!groupsMap.has(p.group)) groupsMap.set(p.group, []);
-      groupsMap.get(p.group)!.push({
-        name: p.name,
-        phone: p.phone,
-        company: p.company,
-        region: p.region,
-        originalGroup: p.originalGroup,
-      });
+    // 권역을 큰 클러스터로 정규화
+    function regionCluster(region: string): string {
+      const r = (region ?? "").trim();
+      if (!r) return "";
+      if (
+        r.includes("서울") ||
+        r.includes("경기") ||
+        r.includes("인천") ||
+        r.includes("강북") ||
+        r.includes("강남") ||
+        r.includes("서남") ||
+        r.includes("강원")
+      )
+        return "수도권";
+      if (r.startsWith("충청") || r.startsWith("대전") || r.startsWith("세종"))
+        return "충청";
+      if (
+        r.startsWith("영남") ||
+        r.startsWith("부산") ||
+        r.startsWith("대구") ||
+        r.startsWith("울산") ||
+        r.startsWith("경상")
+      )
+        return "영남";
+      if (
+        r.startsWith("호남") ||
+        r.startsWith("광주") ||
+        r.startsWith("전라") ||
+        r.startsWith("전남") ||
+        r.startsWith("전북")
+      )
+        return "호남";
+      if (r.startsWith("제주")) return "제주";
+      return r;
     }
-    // 그룹 내 멤버 순서: 권역 클러스터로 안정 정렬 (같은 클러스터끼리 같은 청크로)
-    for (const [name, members] of groupsMap) {
-      const sorted = shuffle(members).sort((a, b) =>
-        regionCluster(a.region).localeCompare(regionCluster(b.region), "ko"),
-      );
-      groupsMap.set(name, sorted);
-    }
-    const groupTotalSize = (g: string) => groupsMap.get(g)?.length ?? 0;
 
-    // 청크 최대 = 테이블 좌석 수 — 같은 조 최대한 한 테이블에 묶이게
-    //   - size ≤ seatsPerTable: 통째로 [size]
-    //   - size 초과: 균등 분할 (각 청크 ≥ 2 보장)
-    //   - seatsPerTable 보다 1 큰 경우 ([N+1] = [ceil((N+1)/2), floor((N+1)/2)] 안전)
-    const MAX_CHUNK = seatsPerTable;
-    function evenChunks(size: number): number[] {
-      if (size <= MAX_CHUNK) return [size];
-      const numChunks = Math.ceil(size / MAX_CHUNK);
-      const base = Math.floor(size / numChunks);
-      const extra = size % numChunks;
-      return Array.from({ length: numChunks }, (_, i) =>
-        i < extra ? base + 1 : base,
-      );
+    // 미응답 판정 — responseStatus 또는 조번호 에 "미응답" 포함되면 분리
+    function isUnresponded(p: Person): boolean {
+      if (/미응답/.test(p.responseStatus ?? "")) return true;
+      if (/미응답/.test(p.group)) return true;
+      return false;
     }
 
-    // 1. atom 분리: ≥2 (bigAtoms) / =1 (singletons, 본질적 1인 조)
-    const bigAtoms: Atom[] = [];
-    const singletons: Atom[] = [];
-    for (const [name, members] of groupsMap) {
-      if (members.length === 1) {
-        singletons.push({ group: name, members: [...members] });
-        continue;
+    // 1인 조 (size=1) 들은 같은 "기타조" 로 자동 통합 (미응답 제외)
+    const groupCounts = new Map<string, number>();
+    for (const p of people) {
+      if (isUnresponded(p)) continue;
+      groupCounts.set(p.group, (groupCounts.get(p.group) ?? 0) + 1);
+    }
+    const peopleProcessed: Person[] = people.map((p) => {
+      if (isUnresponded(p)) return p;
+      if (groupCounts.get(p.group) === 1) {
+        return { ...p, group: MERGED_GROUP, originalGroup: p.group };
       }
-      const sizes = evenChunks(members.length);
-      let idx = 0;
-      for (const sz of sizes) {
-        bigAtoms.push({ group: name, members: members.slice(idx, idx + sz) });
-        idx += sz;
-      }
-    }
+      return p;
+    });
 
-    const tables: TableSeat[][] = Array.from({ length: numTables }, () => []);
-    const overflow: TableSeat[] = [];
-
-    function placeMember(table: TableSeat[], group: string, m: Member) {
-      table.push({
-        group,
-        name: m.name,
-        phone: m.phone,
-        company: m.company,
-        region: m.region,
-        originalGroup: m.originalGroup,
-      });
-    }
-
-    // 2. FFD - bigAtoms 배치 — 조 번호 순 정렬 (앞 조가 앞 테이블에)
-    //    "기타조" (1인 조 통합) 는 맨 뒤로
+    // 그룹 번호 헬퍼 (정렬용)
     function groupOrder(g: string): number {
       if (g === MERGED_GROUP) return Number.MAX_SAFE_INTEGER;
       const n = parseInt(g, 10);
       return isNaN(n) ? Number.MAX_SAFE_INTEGER - 1 : n;
     }
-    const queue: Atom[] = shuffle(bigAtoms).sort((a, b) => {
-      const oA = groupOrder(a.group);
-      const oB = groupOrder(b.group);
-      if (oA !== oB) return oA - oB;
-      // 같은 그룹의 청크는 size desc
-      return b.members.length - a.members.length;
+
+    // 정렬: 조번호 → 권역 클러스터 (같은 그룹 안에서는 권역끼리 묶이게)
+    function sortPpl(arr: Person[]): Person[] {
+      return shuffle(arr).sort((a, b) => {
+        const oA = groupOrder(a.group);
+        const oB = groupOrder(b.group);
+        if (oA !== oB) return oA - oB;
+        return regionCluster(a.region).localeCompare(regionCluster(b.region), "ko");
+      });
+    }
+
+    // 미응답 분리
+    const respondedPpl = peopleProcessed.filter((p) => !isUnresponded(p));
+    const unrespondedPpl = peopleProcessed.filter((p) => isUnresponded(p));
+
+    const sortedResponded = sortPpl(respondedPpl);
+    const sortedUnresponded = sortPpl(unrespondedPpl);
+
+    // 좌석 객체 변환
+    const toSeat = (p: Person): TableSeat => ({
+      group: p.group,
+      name: p.name,
+      phone: p.phone,
+      company: p.company,
+      region: p.region,
+      responseStatus: p.responseStatus,
+      originalGroup: p.originalGroup,
     });
-    while (queue.length > 0) {
-      const atom = queue.shift()!;
-      const sz = atom.members.length;
 
-      // first-fit 우선순위 (앞 테이블에 앞 조가 앉게 — 모두 lowest index 우선):
-      //  1) 같은 조 이미 있는 테이블 (조 분산 방지)
-      //  2) 같은 권역 클러스터 테이블
-      //  3) 빈 테이블
-      //  4) 마지막 수단 — 아무 자리
-      const atomCluster = regionCluster(atom.members[0]?.region ?? "");
-      let bestIdx = -1;
-
-      // 1) 같은 조 (lowest index)
-      for (let i = 0; i < tables.length; i++) {
-        const sp = seatsPerTable - tables[i].length;
-        if (sp >= sz && tables[i].some((s) => s.group === atom.group)) {
-          bestIdx = i;
-          break;
-        }
-      }
-      // 2) 같은 권역 클러스터 (lowest index)
-      if (bestIdx === -1 && atomCluster) {
-        for (let i = 0; i < tables.length; i++) {
-          const sp = seatsPerTable - tables[i].length;
-          if (
-            sp >= sz &&
-            tables[i].some((s) => regionCluster(s.region) === atomCluster)
-          ) {
-            bestIdx = i;
-            break;
-          }
-        }
-      }
-      // 3) 빈 테이블 (lowest index)
-      if (bestIdx === -1) {
-        for (let i = 0; i < tables.length; i++) {
-          if (tables[i].length === 0 && seatsPerTable >= sz) {
-            bestIdx = i;
-            break;
-          }
-        }
-      }
-      // 4) 마지막 수단 (lowest index 가능 자리)
-      if (bestIdx === -1) {
-        for (let i = 0; i < tables.length; i++) {
-          const sp = seatsPerTable - tables[i].length;
-          if (sp >= sz) {
-            bestIdx = i;
-            break;
-          }
-        }
-      }
-      if (bestIdx !== -1) {
-        for (const m of atom.members) placeMember(tables[bestIdx], atom.group, m);
-        continue;
-      }
-
-      // 통째로 못 넣음 → sz≥4 면 절반 분할 (각 ≥2 유지)
-      if (sz >= 4) {
-        const half = Math.ceil(sz / 2);
-        queue.push({
-          group: atom.group,
-          members: atom.members.slice(0, half),
-        });
-        queue.push({ group: atom.group, members: atom.members.slice(half) });
-        queue.sort((a, b) => {
-          const oA = groupOrder(a.group);
-          const oB = groupOrder(b.group);
-          if (oA !== oB) return oA - oB;
-          return b.members.length - a.members.length;
-        });
-        continue;
-      }
-
-      // sz=2 or 3 인데 통째도 안 됨 → 개별 배치 (post-process 가 solo 정리)
-      for (const m of atom.members) {
-        let placedIdx = -1;
-        for (let i = 0; i < tables.length; i++) {
-          if (
-            seatsPerTable - tables[i].length >= 1 &&
-            tables[i].some((s) => s.group === atom.group)
-          ) {
-            placedIdx = i;
-            break;
-          }
-        }
-        if (placedIdx === -1) {
-          placedIdx = tables.findIndex((t) => t.length < seatsPerTable);
-        }
-        if (placedIdx !== -1) {
-          placeMember(tables[placedIdx], atom.group, m);
-        } else {
-          overflow.push({
-            group: atom.group,
-            name: m.name,
-            phone: m.phone,
-            company: m.company,
-            region: m.region,
-            originalGroup: m.originalGroup,
-          });
-        }
-      }
+    // N명씩 채우기 — 일반 테이블
+    const tables: TableSeat[][] = [];
+    for (let i = 0; i < sortedResponded.length; i += seatsPerTable) {
+      tables.push(sortedResponded.slice(i, i + seatsPerTable).map(toSeat));
+    }
+    // 미응답 테이블 (별도)
+    const unrespondedTableIndices: number[] = [];
+    for (let i = 0; i < sortedUnresponded.length; i += seatsPerTable) {
+      unrespondedTableIndices.push(tables.length);
+      tables.push(sortedUnresponded.slice(i, i + seatsPerTable).map(toSeat));
     }
 
-    // 3. singletons (1인 조) 배치 — 자리 가장 많은 테이블에 모아 앉히기
-    //    (각자 solo 이긴 하지만 한 테이블에 모여 "혼합 테이블" 로 정리됨)
-    for (const atom of singletons) {
-      const m = atom.members[0];
-      // 자리 가장 많은 테이블 (있으면 같은 조 이미 있는 테이블 우선)
-      let idx = -1;
-      let bestSpace = 0;
-      for (let i = 0; i < tables.length; i++) {
-        const sp = seatsPerTable - tables[i].length;
-        if (sp >= 1 && tables[i].some((s) => s.group === atom.group)) {
-          idx = i;
-          break;
-        }
-      }
-      if (idx === -1) {
-        for (let i = 0; i < tables.length; i++) {
-          const sp = seatsPerTable - tables[i].length;
-          if (sp > bestSpace) {
-            bestSpace = sp;
-            idx = i;
-          }
-        }
-      }
-      if (idx !== -1) {
-        placeMember(tables[idx], atom.group, m);
-      } else {
-        overflow.push({
-          group: atom.group,
-          name: m.name,
-          phone: m.phone,
-          company: m.company,
-          region: m.region,
-          originalGroup: m.originalGroup,
-        });
-      }
-    }
+    // numTables 만큼 빈 테이블 패딩
+    while (tables.length < numTables) tables.push([]);
 
-    // 4. 후처리: solo (조 인원 1명) 제거. 1인 조는 본질적 solo 라 제외.
-    function findSolos(): Array<{ i: number; group: string }> {
-      const out: Array<{ i: number; group: string }> = [];
-      for (let i = 0; i < tables.length; i++) {
-        const counts = new Map<string, number>();
-        for (const s of tables[i])
-          counts.set(s.group, (counts.get(s.group) ?? 0) + 1);
-        for (const [g, n] of counts) {
-          if (n === 1 && groupTotalSize(g) > 1) {
-            out.push({ i, group: g });
-          }
-        }
-      }
-      return out;
-    }
-
-    for (let pass = 0; pass < 500; pass++) {
-      const solos = findSolos();
-      if (solos.length === 0) break;
-      let changed = false;
-
-      for (const { i, group: g } of solos) {
-        const seatIdx = tables[i].findIndex((s) => s.group === g);
-        if (seatIdx === -1) continue;
-
-        // 1) 직접 이동: 같은 조 + 자리 있는 테이블로 (P 가 빠지면 i 의 G solo 해소)
-        let moved = false;
-        for (let j = 0; j < tables.length; j++) {
-          if (j === i) continue;
-          if (seatsPerTable - tables[j].length < 1) continue;
-          if (!tables[j].some((s) => s.group === g)) continue;
-          const seat = tables[i].splice(seatIdx, 1)[0];
-          tables[j].push(seat);
-          moved = true;
-          changed = true;
-          break;
-        }
-        if (moved) break;
-
-        // 2) Swap: i 의 P (조 g) ↔ j 의 K (조 H, H≠g). 새로운 solo 안 만드는 조건만.
-        const countsI = new Map<string, number>();
-        for (const s of tables[i])
-          countsI.set(s.group, (countsI.get(s.group) ?? 0) + 1);
-
-        let swapped = false;
-        for (let j = 0; j < tables.length && !swapped; j++) {
-          if (j === i) continue;
-          if (!tables[j].some((s) => s.group === g)) continue;
-          const countsJ = new Map<string, number>();
-          for (const s of tables[j])
-            countsJ.set(s.group, (countsJ.get(s.group) ?? 0) + 1);
-
-          for (let k = 0; k < tables[j].length; k++) {
-            const K = tables[j][k];
-            if (K.group === g) continue;
-            const H = K.group;
-            const hAtI = countsI.get(H) ?? 0;
-            const hAtJ = countsJ.get(H) ?? 0;
-            // K 가 i 로 이동 시 i 에 H solo 가 안 되려면 hAtI ≥ 1 (H가 1인 조라면 어차피 본질적 solo)
-            if (hAtI < 1 && groupTotalSize(H) > 1) continue;
-            // K 가 j 에서 빠지면 j 의 H = hAtJ - 1. 이 값이 1 이면 새 solo (H가 1인 조 제외)
-            if (hAtJ === 2 && groupTotalSize(H) > 1) continue;
-
-            const P = tables[i][seatIdx];
-            tables[i][seatIdx] = K;
-            tables[j][k] = P;
-            changed = true;
-            swapped = true;
-            break;
-          }
-        }
-        if (swapped) break;
-
-        // 3) 3-way 체인 이동:
-        //    i 에서 X(조 H≠g) 한 명을 m 으로 보내 자리 1 만들고,
-        //    j 의 Q(조 g)를 i 로 옮겨 P 와 합쳐 solo 해소.
-        //    조건: H@i ≥ 3 (i 에서 X 빠져도 solo 안 남), G@j ≥ 3 (j 에서 Q 빠져도 solo 안 남),
-        //         H@m ≥ 1 (m 에서 X 가 새 solo 안 됨).
-        let chained = false;
-        for (let j = 0; j < tables.length && !chained; j++) {
-          if (j === i) continue;
-          const gAtJ = tables[j].filter((s) => s.group === g).length;
-          if (gAtJ < 3) continue;
-
-          for (let xIdx = 0; xIdx < tables[i].length && !chained; xIdx++) {
-            const X = tables[i][xIdx];
-            if (X.group === g) continue;
-            const H = X.group;
-            const hAtI = countsI.get(H) ?? 0;
-            if (hAtI < 3 && groupTotalSize(H) > 1) continue;
-
-            for (let m = 0; m < tables.length; m++) {
-              if (m === i || m === j) continue;
-              if (seatsPerTable - tables[m].length < 1) continue;
-              const hAtM = tables[m].filter((s) => s.group === H).length;
-              if (hAtM < 1 && groupTotalSize(H) > 1) continue;
-
-              const qIdx = tables[j].findIndex((s) => s.group === g);
-              if (qIdx === -1) continue;
-
-              const Xseat = tables[i][xIdx];
-              const Qseat = tables[j][qIdx];
-              tables[i][xIdx] = Qseat;
-              tables[j].splice(qIdx, 1);
-              tables[m].push(Xseat);
-
-              changed = true;
-              chained = true;
-              break;
-            }
-          }
-        }
-        if (chained) break;
-      }
-
-      if (!changed) break;
-    }
-
-    // 4.5. Hill climbing: 핸드코드가 못 잡는 케이스 — 모든 단일 이동/swap 중에 solo net reduction 있는 거 catch
-    function localSoloAt(tableIdx: number): number {
-      const counts = new Map<string, number>();
-      for (const s of tables[tableIdx])
-        counts.set(s.group, (counts.get(s.group) ?? 0) + 1);
-      let c = 0;
-      for (const [gg, n] of counts) {
-        if (n === 1 && groupTotalSize(gg) > 1) c++;
-      }
-      return c;
-    }
-
-    let hcChanged = true;
-    let hcPass = 0;
-    while (hcChanged && hcPass++ < 200) {
-      hcChanged = false;
-
-      // 단일 이동: i 의 멤버 한 명을 j 로
-      for (let i = 0; i < tables.length && !hcChanged; i++) {
-        for (let k = 0; k < tables[i].length && !hcChanged; k++) {
-          const beforeI = localSoloAt(i);
-          for (let j = 0; j < tables.length; j++) {
-            if (j === i) continue;
-            if (seatsPerTable - tables[j].length < 1) continue;
-            const beforeJ = localSoloAt(j);
-            const seat = tables[i].splice(k, 1)[0];
-            tables[j].push(seat);
-            const afterI = localSoloAt(i);
-            const afterJ = localSoloAt(j);
-            if (afterI + afterJ < beforeI + beforeJ) {
-              hcChanged = true;
-              break;
-            }
-            tables[j].pop();
-            tables[i].splice(k, 0, seat);
-          }
-        }
-      }
-      if (hcChanged) continue;
-
-      // 단일 swap: i 의 (i,k) ↔ j 의 (j,l)
-      for (let i = 0; i < tables.length && !hcChanged; i++) {
-        for (let k = 0; k < tables[i].length && !hcChanged; k++) {
-          for (let j = i + 1; j < tables.length && !hcChanged; j++) {
-            for (let l = 0; l < tables[j].length; l++) {
-              const beforeI = localSoloAt(i);
-              const beforeJ = localSoloAt(j);
-              const tmp = tables[i][k];
-              tables[i][k] = tables[j][l];
-              tables[j][l] = tmp;
-              const afterI = localSoloAt(i);
-              const afterJ = localSoloAt(j);
-              if (afterI + afterJ < beforeI + beforeJ) {
-                hcChanged = true;
-                break;
-              }
-              const t = tables[i][k];
-              tables[i][k] = tables[j][l];
-              tables[j][l] = t;
-            }
-          }
-        }
-      }
-    }
-
-    // 5. splits (한 조가 여러 테이블에 분산됨) 계산
+    // 결과 메타 계산
     const groupTablesMap = new Map<string, Set<number>>();
     for (let i = 0; i < tables.length; i++) {
       for (const s of tables[i]) {
@@ -789,18 +469,19 @@ export default function TeamBuilder() {
       .filter(([, s]) => s.size > 1)
       .map(([g, s]) => ({ group: g, tables: [...s].sort((a, b) => a - b) }));
 
-    const remainingSolos = findSolos();
-    const singletonGroupNames = [...groupsMap.entries()]
-      .filter(([, m]) => m.length === 1)
+    const allGroups = new Set(peopleProcessed.map((p) => p.group));
+    const singletonGroupNames = [...groupCounts.entries()]
+      .filter(([, n]) => n === 1)
       .map(([g]) => g);
 
     return {
       tables,
       splits,
-      overflow,
-      totalGroups: groupsMap.size,
-      remainingSolos,
+      overflow: [] as TableSeat[],
+      totalGroups: allGroups.size,
+      remainingSolos: [] as { i: number; group: string }[],
       singletonGroups: singletonGroupNames,
+      unrespondedTableIndices,
     };
   }, [people, numTables, seatsPerTable, shuffleSeed, manualAssignment]);
 
@@ -816,8 +497,12 @@ export default function TeamBuilder() {
       권역: string;
       상호명: string;
       "핸드폰 뒷자리": string;
+      응답상태: string;
+      "테이블 종류": string;
     }[] = [];
+    const unrIdxSet = new Set(assignment.unrespondedTableIndices ?? []);
     assignment.tables.forEach((seats, i) => {
+      const tableType = unrIdxSet.has(i) ? "미응답" : "일반";
       for (const s of seats) {
         rows.push({
           테이블번호: i + 1,
@@ -827,6 +512,8 @@ export default function TeamBuilder() {
           권역: s.region,
           상호명: s.company,
           "핸드폰 뒷자리": s.phone,
+          응답상태: s.responseStatus ?? "",
+          "테이블 종류": tableType,
         });
       }
     });
@@ -840,6 +527,8 @@ export default function TeamBuilder() {
           권역: s.region,
           상호명: s.company,
           "핸드폰 뒷자리": s.phone,
+          응답상태: s.responseStatus ?? "",
+          "테이블 종류": "좌석부족",
         });
       }
     }
@@ -930,7 +619,7 @@ export default function TeamBuilder() {
           2️⃣ 엑셀 업로드
         </h2>
         <p className="mb-3 text-xs text-zinc-500">
-          엑셀 파일에 <code>조번호</code>, <code>이름</code>, <code>권역</code>(선택), <code>상호명</code>(선택), <code>핸드폰 뒷자리</code> 컬럼이 있어야 합니다. 첫 행이 헤더, 컬럼 순서는 자유.
+          엑셀 파일에 <code>조번호</code>, <code>이름</code>, <code>권역</code>(선택), <code>응답상태</code>(선택, "미응답" 표기 시 별도 테이블), <code>상호명</code>(선택), <code>핸드폰 뒷자리</code> 컬럼이 있어야 합니다. 첫 행이 헤더, 컬럼 순서는 자유.
           <br />
           <span className="text-blue-600">
             💡 <code>테이블번호</code> 컬럼이 있으면 자동 배정 건너뛰고 <b>그 배치 그대로 시각화</b> (수동 편집한 엑셀 다시 업로드 가능)
@@ -1176,14 +865,25 @@ export default function TeamBuilder() {
                   });
                 }
                 const isFull = seats.length === seatsPerTable;
+                const isUnrespondedTable = assignment.unrespondedTableIndices?.includes(i) ?? false;
                 return (
                   <div
                     key={i}
-                    className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm"
+                    className={
+                      isUnrespondedTable
+                        ? "rounded-2xl border-2 border-dashed border-orange-300 bg-orange-50/40 p-4 shadow-sm"
+                        : "rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm"
+                    }
                   >
                     <div className="mb-3 flex items-baseline justify-between border-b border-zinc-100 pb-2">
-                      <h3 className="text-base font-bold text-zinc-900">
-                        🪑 테이블 {i + 1}
+                      <h3
+                        className={
+                          isUnrespondedTable
+                            ? "text-base font-bold text-orange-700"
+                            : "text-base font-bold text-zinc-900"
+                        }
+                      >
+                        {isUnrespondedTable ? "❓ 미응답 테이블" : `🪑 테이블 ${i + 1}`}
                       </h3>
                       <span
                         className={
