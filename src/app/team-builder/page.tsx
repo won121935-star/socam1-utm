@@ -418,8 +418,7 @@ export default function TeamBuilder() {
     //   1) 조번호 (낮은 조 → 앞 테이블)
     //   2) 권역 클러스터 (수도권/충청/영남/호남/제주)
     //   3) 원본 권역 (강북권역, 서남권역 등 — 클러스터 안에서 더 세분)
-    //   4) 이름 (같은 권역 안에서 결정적 순서)
-    // 미응답 / 응답 모두 동일 정렬 사용 (각자 별도 sort)
+    // (같은 조 + 같은 권역 안에서는 셔플 순서 — "다시 계산" 시드별로 다양화)
     function sortPpl(arr: Person[]): Person[] {
       return shuffle(arr).sort((a, b) => {
         const oA = groupOrder(a.group);
@@ -428,9 +427,8 @@ export default function TeamBuilder() {
         const cA = regionCluster(a.region);
         const cB = regionCluster(b.region);
         if (cA !== cB) return cA.localeCompare(cB, "ko");
-        // 같은 클러스터 안에서 원본 권역 으로 더 세분
         if (a.region !== b.region) return a.region.localeCompare(b.region, "ko");
-        return a.name.localeCompare(b.name, "ko");
+        return 0; // 셔플 순서 유지 (안정 정렬)
       });
     }
 
@@ -452,16 +450,92 @@ export default function TeamBuilder() {
       originalGroup: p.originalGroup,
     });
 
-    // N명씩 채우기 — 일반 테이블
-    const tables: TableSeat[][] = [];
-    for (let i = 0; i < sortedResponded.length; i += seatsPerTable) {
-      tables.push(sortedResponded.slice(i, i + seatsPerTable).map(toSeat));
+    // 솔로 방지 — chunk 단위 (각 chunk 사이즈 ≥ 2) 로 묶어서 같이 이동
+    // chunks: 같은 그룹의 연속된 사람들 (정렬돼있으니 group # 순서대로 자연 grouping)
+    // 같은 그룹은 절대 1명만 떨어지지 않도록 chunk 사이즈 = min(MAX_CHUNK, 그룹 사이즈)
+    // 각 chunk ≥ 2 보장 (size 5+ 라도 numChunks≥2, base ≥ 2)
+    const MAX_CHUNK = 4;
+    function buildChunks(arr: Person[]): Person[][] {
+      // 그룹별로 연속 묶음
+      const groups = new Map<string, Person[]>();
+      for (const p of arr) {
+        const key = p.group;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(p);
+      }
+      const chunks: Person[][] = [];
+      // 그룹 순서는 sortedResponded/sortedUnresponded 의 첫 등장 순서대로 처리
+      const seen = new Set<string>();
+      for (const p of arr) {
+        if (seen.has(p.group)) continue;
+        seen.add(p.group);
+        const members = groups.get(p.group)!;
+        const sz = members.length;
+        if (sz <= MAX_CHUNK) {
+          chunks.push(members);
+        } else {
+          // 균등 분할
+          const numChunks = Math.ceil(sz / MAX_CHUNK);
+          const base = Math.floor(sz / numChunks);
+          const extra = sz % numChunks;
+          let idx = 0;
+          for (let c = 0; c < numChunks; c++) {
+            const csz = c < extra ? base + 1 : base;
+            chunks.push(members.slice(idx, idx + csz));
+            idx += csz;
+          }
+        }
+      }
+      return chunks;
     }
-    // 미응답 테이블 (별도)
+
+    // chunk 단위로 테이블에 채우기 — 안 들어가면 다음 테이블로 (솔로 방지 우선)
+    function packIntoTables(chunks: Person[][]): TableSeat[][] {
+      const out: TableSeat[][] = [];
+      let cur: TableSeat[] = [];
+      let rem = seatsPerTable;
+      for (const chunk of chunks) {
+        if (chunk.length <= rem) {
+          for (const m of chunk) cur.push(toSeat(m));
+          rem -= chunk.length;
+          if (rem === 0) {
+            out.push(cur);
+            cur = [];
+            rem = seatsPerTable;
+          }
+        } else {
+          // 안 들어감 → 현재 테이블 flush (partial 가능), 새 테이블에 chunk 배치
+          if (cur.length > 0) {
+            out.push(cur);
+            cur = [];
+            rem = seatsPerTable;
+          }
+          // chunk 가 seatsPerTable 보다 클 일은 없음 (MAX_CHUNK ≤ seatsPerTable)
+          for (const m of chunk) cur.push(toSeat(m));
+          rem -= chunk.length;
+          if (rem === 0) {
+            out.push(cur);
+            cur = [];
+            rem = seatsPerTable;
+          }
+        }
+      }
+      if (cur.length > 0) out.push(cur);
+      return out;
+    }
+
+    const respondedChunks = buildChunks(sortedResponded);
+    const unrespondedChunks = buildChunks(sortedUnresponded);
+
+    // 일반 테이블 + 미응답 테이블
+    const tables: TableSeat[][] = [];
+    const respondedTables = packIntoTables(respondedChunks);
+    tables.push(...respondedTables);
     const unrespondedTableIndices: number[] = [];
-    for (let i = 0; i < sortedUnresponded.length; i += seatsPerTable) {
+    const unrespondedTables = packIntoTables(unrespondedChunks);
+    for (const t of unrespondedTables) {
       unrespondedTableIndices.push(tables.length);
-      tables.push(sortedUnresponded.slice(i, i + seatsPerTable).map(toSeat));
+      tables.push(t);
     }
 
     // numTables 만큼 빈 테이블 패딩
@@ -649,7 +723,7 @@ export default function TeamBuilder() {
         )}
         <div className="flex flex-wrap items-center gap-3">
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-500">
-            <Upload size={14} /> 엑셀 파일 선택
+            <Upload size={14} /> 자동 배정 — 엑셀 업로드
             <input
               ref={fileInputRef}
               type="file"
@@ -658,6 +732,20 @@ export default function TeamBuilder() {
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (f) handleFile(f);
+                if (e.target) e.target.value = ""; // 같은 파일 재업로드 가능
+              }}
+            />
+          </label>
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-purple-600 px-5 py-2 text-sm font-medium text-white hover:bg-purple-500">
+            <ImageIcon size={14} /> 배정 엑셀 → 이미지
+            <input
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              hidden
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleFile(f);
+                if (e.target) e.target.value = "";
               }}
             />
           </label>
@@ -667,6 +755,10 @@ export default function TeamBuilder() {
             </span>
           )}
         </div>
+        <p className="mt-2 text-[11px] text-zinc-400">
+          💡 <b>자동 배정</b>: 조번호·이름 만 있는 엑셀 → 알고리즘이 테이블 배치<br />
+          🖼️ <b>배정 엑셀 → 이미지</b>: <code>테이블번호</code> 컬럼이 있는 (이미 배정된) 엑셀 → 그 배치 그대로 시각화 + 이미지 다운로드
+        </p>
         {error && (
           <div className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700 ring-1 ring-red-200">
             {error}
