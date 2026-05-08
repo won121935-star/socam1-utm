@@ -393,15 +393,24 @@ export default function TeamBuilder() {
       return false;
     }
 
-    // 1인 조 (size=1) 들은 같은 "기타조" 로 자동 통합 (미응답 제외)
-    const groupCounts = new Map<string, number>();
+    // 1인 조 통합: 응답 / 미응답 각각 count 기준
+    //   - 응답 측에서 1명만 있는 조 → "기타조" 로 통합 (응답 그룹)
+    //   - 미응답 측에서 1명만 있는 조 → "기타조" 로 통합 (미응답 그룹)
+    const respondedCount = new Map<string, number>();
+    const unrespondedCount = new Map<string, number>();
     for (const p of people) {
-      if (isUnresponded(p)) continue;
-      groupCounts.set(p.group, (groupCounts.get(p.group) ?? 0) + 1);
+      if (isUnresponded(p)) {
+        unrespondedCount.set(p.group, (unrespondedCount.get(p.group) ?? 0) + 1);
+      } else {
+        respondedCount.set(p.group, (respondedCount.get(p.group) ?? 0) + 1);
+      }
     }
+    // groupCounts 는 검증용 — 1인 조 안내에 쓸 응답 count
+    const groupCounts = respondedCount;
     const peopleProcessed: Person[] = people.map((p) => {
-      if (isUnresponded(p)) return p;
-      if (groupCounts.get(p.group) === 1) {
+      const isUnr = isUnresponded(p);
+      const count = isUnr ? unrespondedCount.get(p.group) : respondedCount.get(p.group);
+      if (count === 1) {
         return { ...p, group: MERGED_GROUP, originalGroup: p.group };
       }
       return p;
@@ -450,89 +459,133 @@ export default function TeamBuilder() {
       originalGroup: p.originalGroup,
     });
 
-    // 솔로 방지 — chunk 단위 (각 chunk 사이즈 ≥ 2) 로 묶어서 같이 이동
-    // chunks: 같은 그룹의 연속된 사람들 (정렬돼있으니 group # 순서대로 자연 grouping)
-    // 같은 그룹은 절대 1명만 떨어지지 않도록 chunk 사이즈 = min(MAX_CHUNK, 그룹 사이즈)
-    // 각 chunk ≥ 2 보장 (size 5+ 라도 numChunks≥2, base ≥ 2)
-    const MAX_CHUNK = 4;
-    function buildChunks(arr: Person[]): Person[][] {
-      // 그룹별로 연속 묶음
-      const groups = new Map<string, Person[]>();
-      for (const p of arr) {
-        const key = p.group;
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key)!.push(p);
-      }
-      const chunks: Person[][] = [];
-      // 그룹 순서는 sortedResponded/sortedUnresponded 의 첫 등장 순서대로 처리
-      const seen = new Set<string>();
-      for (const p of arr) {
-        if (seen.has(p.group)) continue;
-        seen.add(p.group);
-        const members = groups.get(p.group)!;
-        const sz = members.length;
-        if (sz <= MAX_CHUNK) {
-          chunks.push(members);
-        } else {
-          // 균등 분할
-          const numChunks = Math.ceil(sz / MAX_CHUNK);
-          const base = Math.floor(sz / numChunks);
-          const extra = sz % numChunks;
-          let idx = 0;
-          for (let c = 0; c < numChunks; c++) {
-            const csz = c < extra ? base + 1 : base;
-            chunks.push(members.slice(idx, idx + csz));
-            idx += csz;
-          }
-        }
-      }
-      return chunks;
+    // 솔로 방지 + 꽉 채움 알고리즘:
+    //   1) findValidTake — 솔로 안 만드는 max take 계산
+    //   2) findExactCombo — DFS 로 정확히 rem 채우는 (group, take) 조합 탐색
+    //   3) packIntoTables 3-phase:
+    //      Phase 1: 일반 그룹 으로 exact-fit 우선, 안 되면 greedy max
+    //      Phase 2: "기타조" 로 partial 테이블 빈 자리 채움 (어디든 들어가도 솔로 X)
+    //      Phase 3: 남은 기타조 → 자기네 테이블
+
+    function findValidTake(groupSize: number, rem: number): number {
+      let X = Math.min(groupSize, rem);
+      while (X >= 2 && groupSize - X === 1) X--;
+      if (X < 2) return 0;
+      return X;
     }
 
-    // chunk 단위로 테이블에 채우기 — 안 들어가면 다음 테이블로 (솔로 방지 우선)
-    function packIntoTables(chunks: Person[][]): TableSeat[][] {
-      const out: TableSeat[][] = [];
-      let cur: TableSeat[] = [];
-      let rem = seatsPerTable;
-      for (const chunk of chunks) {
-        if (chunk.length <= rem) {
-          for (const m of chunk) cur.push(toSeat(m));
-          rem -= chunk.length;
-          if (rem === 0) {
-            out.push(cur);
-            cur = [];
-            rem = seatsPerTable;
-          }
-        } else {
-          // 안 들어감 → 현재 테이블 flush (partial 가능), 새 테이블에 chunk 배치
-          if (cur.length > 0) {
-            out.push(cur);
-            cur = [];
-            rem = seatsPerTable;
-          }
-          // chunk 가 seatsPerTable 보다 클 일은 없음 (MAX_CHUNK ≤ seatsPerTable)
-          for (const m of chunk) cur.push(toSeat(m));
-          rem -= chunk.length;
-          if (rem === 0) {
-            out.push(cur);
-            cur = [];
-            rem = seatsPerTable;
+    // DFS 로 rem 정확히 채우는 (group, take) 조합 찾기 (depth ≤ 4 로 제한)
+    function findExactCombo(
+      rem: number,
+      keys: string[],
+      gMap: Map<string, Person[]>,
+      depth: number,
+    ): Map<string, number> | null {
+      if (rem === 0) return new Map();
+      if (rem < 2 || depth > 4) return null;
+      for (let i = 0; i < keys.length; i++) {
+        const g = keys[i];
+        const gSize = gMap.get(g)?.length ?? 0;
+        if (gSize === 0) continue;
+        const maxX = Math.min(gSize, rem);
+        for (let X = maxX; X >= 2; X--) {
+          if (X < gSize && gSize - X < 2) continue; // 솔로 발생
+          const sub = findExactCombo(rem - X, keys.slice(i + 1), gMap, depth + 1);
+          if (sub !== null) {
+            sub.set(g, X);
+            return sub;
           }
         }
       }
-      if (cur.length > 0) out.push(cur);
+      return null;
+    }
+
+    function packIntoTables(sortedPpl: Person[]): TableSeat[][] {
+      const groupMap = new Map<string, Person[]>();
+      for (const p of sortedPpl) {
+        if (!groupMap.has(p.group)) groupMap.set(p.group, []);
+        groupMap.get(p.group)!.push(p);
+      }
+      const allKeys = [...groupMap.keys()];
+      const regularKeys = allKeys.filter((k) => k !== MERGED_GROUP);
+      const etcMembers = groupMap.get(MERGED_GROUP) ?? [];
+
+      const out: TableSeat[][] = [];
+
+      // Phase 1: 일반 그룹 으로 exact-fit 우선, 안 되면 greedy max
+      while (true) {
+        const totalRegRemaining = regularKeys.reduce(
+          (s, k) => s + (groupMap.get(k)?.length ?? 0),
+          0,
+        );
+        if (totalRegRemaining === 0) break;
+
+        const cur: TableSeat[] = [];
+        let rem = seatsPerTable;
+
+        // exact-fit 시도
+        const activeKeys = regularKeys.filter((k) => (groupMap.get(k)?.length ?? 0) > 0);
+        const combo = findExactCombo(seatsPerTable, activeKeys, groupMap, 0);
+        if (combo !== null) {
+          // combo 의 그룹 순서대로 take (group # asc 유지)
+          const orderedKeys = activeKeys.filter((k) => combo.has(k));
+          for (const g of orderedKeys) {
+            const X = combo.get(g)!;
+            const members = groupMap.get(g)!.splice(0, X);
+            for (const m of members) cur.push(toSeat(m));
+            rem -= X;
+          }
+        } else {
+          // greedy max (낮은 group # 우선)
+          let progressed = true;
+          while (rem > 0 && progressed) {
+            progressed = false;
+            for (const g of regularKeys) {
+              const groupRem = groupMap.get(g)?.length ?? 0;
+              if (groupRem === 0) continue;
+              const take = findValidTake(groupRem, rem);
+              if (take === 0) continue;
+              const members = groupMap.get(g)!.splice(0, take);
+              for (const m of members) cur.push(toSeat(m));
+              rem -= take;
+              progressed = true;
+              break;
+            }
+          }
+        }
+
+        if (cur.length === 0) break;
+        out.push(cur);
+      }
+
+      // Phase 2: 기타조 로 partial 테이블 빈 자리 채움 (어디든 솔로 안 됨 — 본질이 1인 조 모음)
+      let etcIdx = 0;
+      for (const table of out) {
+        while (table.length < seatsPerTable && etcIdx < etcMembers.length) {
+          table.push(toSeat(etcMembers[etcIdx]));
+          etcIdx++;
+        }
+      }
+
+      // Phase 3: 남은 기타조 → 자기네 테이블
+      while (etcIdx < etcMembers.length) {
+        const cur: TableSeat[] = [];
+        for (let k = 0; k < seatsPerTable && etcIdx < etcMembers.length; k++) {
+          cur.push(toSeat(etcMembers[etcIdx]));
+          etcIdx++;
+        }
+        out.push(cur);
+      }
+
       return out;
     }
 
-    const respondedChunks = buildChunks(sortedResponded);
-    const unrespondedChunks = buildChunks(sortedUnresponded);
-
     // 일반 테이블 + 미응답 테이블
     const tables: TableSeat[][] = [];
-    const respondedTables = packIntoTables(respondedChunks);
+    const respondedTables = packIntoTables(sortedResponded);
     tables.push(...respondedTables);
     const unrespondedTableIndices: number[] = [];
-    const unrespondedTables = packIntoTables(unrespondedChunks);
+    const unrespondedTables = packIntoTables(sortedUnresponded);
     for (const t of unrespondedTables) {
       unrespondedTableIndices.push(tables.length);
       tables.push(t);
